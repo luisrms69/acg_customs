@@ -53,3 +53,10 @@ jspm_packages/
 
 # Aider AI Chat
 .aider*
+
+# Scripts temporales (no se commitean)
+acg_customs/one_offs/
+one_offs/
+
+# Tooling local de Claude Code (symlink de ruta absoluta + settings locales)
+.claude/
