@@ -267,7 +267,7 @@ required_apps = ["erpnext"]
 # ACG Order Import — segregacion por proveedor (server-side, fail-closed)
 # ======================================================================
 
-# Configuracion idempotente (rol de importador + proveedores base).
+# Configuracion idempotente (rol de importador generico).
 after_migrate = "acg_customs.setup.install.after_migrate"
 
 # Capas 1 y 3: filtrado de lista. ANDea con las condiciones nativas (incl. File).
@@ -281,4 +281,3 @@ has_permission = {
 	"ACG Order Import": "acg_customs.permissions.order_import_has_permission",
 	"File": "acg_customs.permissions.file_has_permission",
 }
-

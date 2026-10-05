@@ -47,10 +47,7 @@ class ACGOrderImport(Document):
 		authorized = get_user_provider(user)
 		if not authorized:
 			frappe.throw(
-				_(
-					"No se pudo determinar un proveedor autorizado para el usuario. "
-					"Importacion no permitida."
-				),
+				_("No se pudo determinar un proveedor autorizado para el usuario. Importacion no permitida."),
 				frappe.PermissionError,
 			)
 		if self.provider and self.provider != authorized:
@@ -65,9 +62,7 @@ class ACGOrderImport(Document):
 	# ------------------------------------------------------------------
 	def _process_source_file(self):
 		if not self.get(ORIGINAL_FILE_FIELD):
-			frappe.throw(
-				_("Debe adjuntar el archivo Excel original."), frappe.MandatoryError
-			)
+			frappe.throw(_("Debe adjuntar el archivo Excel original."), frappe.MandatoryError)
 
 		file_doc = self._resolve_file_doc()
 		if not file_doc:

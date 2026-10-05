@@ -17,8 +17,6 @@ class ACGOrderProviderUser(Document):
 		)
 		if existing:
 			frappe.throw(
-				_("El usuario {0} ya tiene un proveedor asignado ({1}).").format(
-					self.user, existing
-				),
+				_("El usuario {0} ya tiene un proveedor asignado ({1}).").format(self.user, existing),
 				frappe.ValidationError,
 			)

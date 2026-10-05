@@ -5,10 +5,26 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "external_branch_code",
+  "address",
   "sales_order",
   "remarks"
  ],
  "fields": [
+  {
+   "fieldname": "external_branch_code",
+   "fieldtype": "Data",
+   "label": "External Branch Code",
+   "in_list_view": 1,
+   "description": "Clave de sucursal del Excel cuya OV cubre esta fila. Clave de idempotencia (import + sucursal)."
+  },
+  {
+   "fieldname": "address",
+   "fieldtype": "Link",
+   "options": "Address",
+   "label": "Shipping Address",
+   "in_list_view": 1
+  },
   {
    "fieldname": "sales_order",
    "fieldtype": "Link",
@@ -20,8 +36,7 @@
   {
    "fieldname": "remarks",
    "fieldtype": "Small Text",
-   "label": "Remarks",
-   "in_list_view": 1
+   "label": "Remarks"
   }
  ],
  "index_web_pages_for_search": 0,

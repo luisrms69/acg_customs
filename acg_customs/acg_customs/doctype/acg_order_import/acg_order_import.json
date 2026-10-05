@@ -39,7 +39,7 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "Draft\nUploaded\nPreflight Passed\nPreflight Failed\nError",
+   "options": "Draft\nUploaded\nPreflight Passed\nPreflight Failed\nApplied\nError",
    "read_only": 1,
    "in_list_view": 1,
    "in_standard_filter": 1

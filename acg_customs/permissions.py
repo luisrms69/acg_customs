@@ -39,11 +39,7 @@ def get_user_provider(user: str | None = None) -> str | None:
 	user = user or frappe.session.user
 
 	# get_all ignora permisos/condiciones (resolucion interna, no sujeta al caller).
-	providers = {
-		p
-		for p in frappe.get_all(PROVIDER_USER_DT, filters={"user": user}, pluck="provider")
-		if p
-	}
+	providers = {p for p in frappe.get_all(PROVIDER_USER_DT, filters={"user": user}, pluck="provider") if p}
 	if len(providers) != 1:
 		return None
 
