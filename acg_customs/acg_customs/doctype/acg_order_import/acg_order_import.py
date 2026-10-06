@@ -18,7 +18,7 @@ class ACGOrderImport(Document):
 		self._set_provider_on_create()
 		self.uploaded_by = frappe.session.user
 		self.uploaded_on = now_datetime()
-		self.status = self.status or "Draft"
+		self.status = self.status or "Uploaded"
 
 	def validate(self):
 		self._process_source_file()

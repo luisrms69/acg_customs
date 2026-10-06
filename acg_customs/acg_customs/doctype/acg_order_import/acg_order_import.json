@@ -17,6 +17,7 @@
   "column_break_audit",
   "uploaded_on",
   "preflight_section",
+  "preflight_report_html",
   "preflight_summary",
   "errors",
   "so_section",
@@ -35,7 +36,7 @@
    "description": "Determinado y validado server-side. El valor enviado por el cliente nunca es fuente de verdad para usuarios proveedor."
   },
   {
-   "default": "Draft",
+   "default": "Uploaded",
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
@@ -101,6 +102,11 @@
    "fieldname": "preflight_section",
    "fieldtype": "Section Break",
    "label": "Preflight / Resultado"
+  },
+  {
+   "fieldname": "preflight_report_html",
+   "fieldtype": "HTML",
+   "label": "Resultado preflight"
   },
   {
    "fieldname": "preflight_summary",
