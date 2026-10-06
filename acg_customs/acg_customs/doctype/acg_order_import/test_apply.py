@@ -32,8 +32,34 @@ from acg_customs.acg_customs.doctype.acg_order_import.test_preflight import (
 	build_workbook,
 )
 from acg_customs.acg_customs.order_import import apply, preflight
+from acg_customs.setup.install import PROVIDER_DIMENSION_FIELD, ensure_provider_dimension
 
 COMPANY = "_Test Company"
+PRICE_LIST = "ACG Test Price List"
+RATE_A = 10.0
+RATE_B = 20.0
+PLU_NP, ITEM_NP = "9100", "PF-ITEM-NOPRICE"  # resuelve por ICD pero SIN Item Price
+
+
+def _ensure_price_list(name):
+	if not frappe.db.exists("Price List", name):
+		currency = frappe.get_cached_value("Company", COMPANY, "default_currency")
+		frappe.get_doc(
+			{"doctype": "Price List", "price_list_name": name, "selling": 1, "currency": currency}
+		).insert(ignore_permissions=True)
+	return name
+
+
+def _ensure_item_price(item_code, rate, price_list=PRICE_LIST):
+	if not frappe.db.exists("Item Price", {"item_code": item_code, "price_list": price_list}):
+		frappe.get_doc(
+			{
+				"doctype": "Item Price",
+				"item_code": item_code,
+				"price_list": price_list,
+				"price_list_rate": rate,
+			}
+		).insert(ignore_permissions=True)
 
 
 def _wb_one():
@@ -61,10 +87,18 @@ class TestApply(FrappeTestCase):
 		_ensure_mapping(CUSTOMER, BRANCH_2, cls.addr_b2, enabled=1)
 		_ensure_item(ITEM_A, PLU_A)
 		_ensure_item(ITEM_B, PLU_B)
+		_ensure_item(ITEM_NP, PLU_NP)  # resuelve por ICD pero sin Item Price
+		# Price List + asociacion nativa al Customer + Item Prices (sinteticos)
+		_ensure_price_list(PRICE_LIST)
+		frappe.db.set_value("Customer", CUSTOMER, "default_price_list", PRICE_LIST)
+		_ensure_item_price(ITEM_A, RATE_A)
+		_ensure_item_price(ITEM_B, RATE_B)
+		# ITEM_NP a proposito SIN Item Price
 		_ensure_provider(PROVIDER, customer=CUSTOMER)
 		_ensure_provider(PROVIDER2, customer=CUSTOMER)
 		frappe.db.set_value("ACG Order Provider", PROVIDER, "company", COMPANY)
 		frappe.db.set_value("ACG Order Provider", PROVIDER2, "company", COMPANY)
+		ensure_provider_dimension()  # Accounting Dimension de proveedor (campo en Sales Order)
 		cls.user = _ensure_user(USER, PROVIDER)
 		cls.user2 = _ensure_user(USER2, PROVIDER2)
 
@@ -101,6 +135,11 @@ class TestApply(FrappeTestCase):
 		self.assertEqual(len(so.items), 1)
 		self.assertEqual(so.items[0].item_code, ITEM_A)
 		self.assertEqual(so.items[0].qty, 5)
+		# Rate obtenido por pricing nativo desde la Price List (no rate=0)
+		self.assertEqual(so.items[0].rate, RATE_A)
+		self.assertEqual(so.items[0].amount, RATE_A * 5)
+		# Accounting Dimension de proveedor poblada en la OV
+		self.assertEqual(so.get(PROVIDER_DIMENSION_FIELD), PROVIDER)
 
 	# varias sucursales -> varias OVs, lineas correctas por sucursal
 	def test_multiple_branches(self):
@@ -170,6 +209,41 @@ class TestApply(FrappeTestCase):
 			with self.assertRaises(frappe.ValidationError):
 				apply.create_sales_orders(doc.name)
 
+		doc.reload()
+		self.assertNotEqual(doc.status, "Applied")
+		self.assertEqual(len(doc.sales_orders), 0)
+		self.assertEqual(frappe.db.count("Sales Order"), before)  # rollback total
+
+	# Accounting Dimension de proveedor presente en TODAS las OVs generadas
+	def test_provider_dimension_on_all_sales_orders(self):
+		self.assertTrue(frappe.get_meta("Sales Order").has_field(PROVIDER_DIMENSION_FIELD))
+		doc = self._passed_import(_wb_two())
+		apply.create_sales_orders(doc.name)
+		doc.reload()
+		for row in doc.sales_orders:
+			so = frappe.get_doc("Sales Order", row.sales_order)
+			self.assertEqual(so.get(PROVIDER_DIMENSION_FIELD), PROVIDER)
+
+	# Precios por sucursal correctos (pricing nativo, varias lineas)
+	def test_rates_from_price_list(self):
+		doc = self._passed_import(_wb_two())
+		apply.create_sales_orders(doc.name)
+		mapping = self._so_branch_map(doc)
+		so2 = frappe.get_doc("Sales Order", mapping[BRANCH_2])  # A=2, B=3
+		rates = {i.item_code: i.rate for i in so2.items}
+		self.assertEqual(rates[ITEM_A], RATE_A)
+		self.assertEqual(rates[ITEM_B], RATE_B)
+		self.assertEqual(so2.grand_total, RATE_A * 2 + RATE_B * 3)
+
+	# Fail-closed por precio faltante: Item resoluble pero SIN Item Price -> no se crean OVs
+	def test_missing_price_fails_closed(self):
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}], [{"plu": PLU_NP, "articulo": "SIN PRECIO"}], {(0, 0): 4}
+		)
+		doc = self._passed_import(wb)  # preflight PASS (resuelve por ICD)
+		before = frappe.db.count("Sales Order")
+		with self.assertRaises(frappe.ValidationError):
+			apply.create_sales_orders(doc.name)
 		doc.reload()
 		self.assertNotEqual(doc.status, "Applied")
 		self.assertEqual(len(doc.sales_orders), 0)

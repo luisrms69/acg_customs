@@ -52,7 +52,10 @@ def _build_plan(parsed, customer):
 	return plan
 
 
-def _create_sales_order(customer, company, address, items):
+PROVIDER_DIMENSION_FIELD = "acg_order_provider"  # Accounting Dimension nativa (proveedor)
+
+
+def _create_sales_order(customer, company, address, items, provider, price_list):
 	today = frappe.utils.nowdate()
 	so = frappe.get_doc(
 		{
@@ -63,8 +66,14 @@ def _create_sales_order(customer, company, address, items):
 			"transaction_date": today,
 			"delivery_date": today,
 			"shipping_address_name": address,
+			# Lista de precios tomada del Customer (fuente nativa, sin hardcodear nombre).
+			# ERPNext resuelve el rate desde Item Price de esta lista.
+			"selling_price_list": price_list,
+			PROVIDER_DIMENSION_FIELD: provider,  # identifica al proveedor (Accounting Dimension)
 			"items": [
-				{"item_code": item_code, "qty": qty, "delivery_date": today, "rate": 0}
+				# Sin 'rate': ERPNext lo resuelve por pricing nativo
+				# (Customer.default_price_list -> Item Price). El precio NO se duplica aqui.
+				{"item_code": item_code, "qty": qty, "delivery_date": today}
 				for item_code, qty in sorted(items.items())
 			],
 		}
@@ -107,6 +116,24 @@ def create_sales_orders(order_import: str) -> dict:
 	if not company:
 		frappe.throw(_("El perfil no tiene Company configurada."), frappe.ValidationError)
 
+	# Fail-closed: la Accounting Dimension de proveedor debe estar configurada (campo en SO).
+	if not frappe.get_meta("Sales Order").has_field(PROVIDER_DIMENSION_FIELD):
+		frappe.throw(
+			_(
+				"La Accounting Dimension de proveedor (campo '{0}' en Sales Order) no esta "
+				"configurada. Ejecute migrate para crearla."
+			).format(PROVIDER_DIMENSION_FIELD),
+			frappe.ValidationError,
+		)
+
+	# Fail-closed: el Customer debe tener lista de precios nativa (default_price_list).
+	price_list = frappe.db.get_value("Customer", customer, "default_price_list")
+	if not price_list:
+		frappe.throw(
+			_("El Customer {0} no tiene lista de precios (default_price_list) configurada.").format(customer),
+			frappe.ValidationError,
+		)
+
 	# Re-parsear para construir el plan (misma fuente inmutable)
 	content, _sha = preflight._load_content(doc)
 	wb = io.BytesIO(content)
@@ -125,15 +152,30 @@ def create_sales_orders(order_import: str) -> dict:
 	frappe.db.savepoint(savepoint)
 	try:
 		created = []
+		missing_price = []
 		for code in sorted(plan):
 			if code in existing_codes:
 				continue
-			so = _create_sales_order(customer, company, plan[code]["address"], plan[code]["items"])
+			so = _create_sales_order(
+				customer, company, plan[code]["address"], plan[code]["items"], doc.provider, price_list
+			)
+			# Gate fail-closed de precio: tras el pricing nativo, ninguna linea puede quedar en rate 0.
+			for it in so.items:
+				if not it.rate:
+					missing_price.append(f"{code}:{it.item_code}")
 			doc.append(
 				"sales_orders",
 				{"sales_order": so.name, "external_branch_code": code, "address": plan[code]["address"]},
 			)
 			created.append(so.name)
+		if missing_price:
+			frappe.throw(
+				_(
+					"Sin precio valido en la Price List del Customer para {0} linea(s): {1}. "
+					"No se crean Sales Orders con rate 0."
+				).format(len(missing_price), ", ".join(missing_price[:20])),
+				frappe.ValidationError,
+			)
 		doc.status = "Applied"
 		doc.save(ignore_permissions=True)
 	except Exception:
