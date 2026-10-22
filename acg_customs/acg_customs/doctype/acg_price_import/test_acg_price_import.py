@@ -99,9 +99,22 @@ class TestPriceImport(FrappeTestCase):
 		cls.importer = _ensure_user(IMPORTER_USER, "ACG Order Importer")
 
 	def setUp(self):
-		# aislar Item Prices entre tests
+		# aislar Item Prices y exclusiones entre tests
 		for n in frappe.get_all("Item Price", filters={"price_list": PRICE_LIST}, pluck="name"):
 			frappe.delete_doc("Item Price", n, ignore_permissions=True, force=True)
+		for n in frappe.get_all("ACG External Code Exclusion", filters={"customer": CUSTOMER}, pluck="name"):
+			frappe.delete_doc("ACG External Code Exclusion", n, ignore_permissions=True, force=True)
+
+	def _exclude(self, code, enabled=1):
+		return frappe.get_doc(
+			{
+				"doctype": "ACG External Code Exclusion",
+				"customer": CUSTOMER,
+				"external_code": code,
+				"enabled": enabled,
+				"reason": "Fuera de catalogo (test)",
+			}
+		).insert(ignore_permissions=True)
 
 	def tearDown(self):
 		frappe.set_user("Administrator")
@@ -230,3 +243,61 @@ class TestPriceImport(FrappeTestCase):
 				service.run_preflight(doc.name)
 		finally:
 			frappe.set_user("Administrator")
+
+	# 12. exclusion activa -> skipped y el preflight NO falla por ese codigo
+	def test_excluded_code_skipped_passes(self):
+		self._exclude("888888")
+		doc, s = self._pf(build_price_wb([(PLU_A, "A", 10.0), ("888888", "Fuera", 9.9)]))
+		self.assertEqual(s["result"], "PASS")
+		self.assertEqual(s["skipped"], 1)
+		self.assertEqual(s["resolved"], 1)
+		actions = {ln.code: ln.action for ln in doc.lines}
+		self.assertEqual(actions["888888"], "skipped")
+		self.assertEqual(actions[PLU_A], "new")
+		# la linea omitida conserva code/description/new_rate
+		skipped = next(ln for ln in doc.lines if ln.code == "888888")
+		self.assertEqual(skipped.description, "Fuera")
+		self.assertEqual(skipped.new_rate, 9.9)
+		self.assertIsNone(skipped.item)
+
+	# 13. codigo excluido nunca crea Item Price
+	def test_excluded_never_creates_item_price(self):
+		self._exclude("888888")
+		doc, _ = self._pf(build_price_wb([(PLU_A, "A", 10.0), ("888888", "Fuera", 9.9)]))
+		service.apply_prices(doc.name)
+		self.assertEqual(frappe.db.count("Item Price", {"price_list": PRICE_LIST}), 1)
+		self.assertEqual(
+			frappe.db.get_value(
+				"Item Price", {"item_code": ITEM_A, "price_list": PRICE_LIST}, "price_list_rate"
+			),
+			10.0,
+		)
+
+	# 14. no resuelto SIN exclusion -> sigue FAIL
+	def test_unresolved_without_exclusion_fails(self):
+		_, s = self._pf(build_price_wb([("888888", "Fuera", 9.9)]))
+		self.assertEqual(s["result"], "FAIL")
+		self.assertEqual(s["unresolved"], 1)
+		self.assertEqual(s["skipped"], 0)
+
+	# 15. exclusion DESHABILITADA -> sigue FAIL
+	def test_disabled_exclusion_fails(self):
+		self._exclude("888888", enabled=0)
+		_, s = self._pf(build_price_wb([("888888", "Fuera", 9.9)]))
+		self.assertEqual(s["result"], "FAIL")
+		self.assertEqual(s["unresolved"], 1)
+		self.assertEqual(s["skipped"], 0)
+
+	# 16. exclusion no oculta OTROS errores reales
+	def test_exclusion_does_not_hide_other_errors(self):
+		self._exclude("888888")
+		_, s = self._pf(build_price_wb([("888888", "Fuera", 9.9), ("777777", "Otro", 5.0)]))
+		self.assertEqual(s["result"], "FAIL")
+		self.assertEqual(s["skipped"], 1)
+		self.assertEqual(s["unresolved"], 1)
+
+	# 17. summary siempre incluye skipped
+	def test_summary_has_skipped_key(self):
+		_, s = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))
+		self.assertIn("skipped", s)
+		self.assertEqual(s["skipped"], 0)

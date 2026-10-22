@@ -80,6 +80,7 @@ function acg_render_price_preflight(frm) {
 		[__("Productos (filas)"), s.total_rows],
 		[__("Resueltos"), s.resolved],
 		[__("No resueltos"), s.unresolved],
+		[__("Omitidos / fuera de catálogo"), s.skipped],
 		[__("Nuevos"), s.new],
 		[__("Cambiados"), s.changed],
 		[__("Sin cambio"), s.unchanged],

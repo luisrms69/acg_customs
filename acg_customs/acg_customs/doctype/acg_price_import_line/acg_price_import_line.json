@@ -47,7 +47,7 @@
   {
    "fieldname": "action",
    "fieldtype": "Select",
-   "options": "new\nchanged\nunchanged\nunresolved",
+   "options": "new\nchanged\nunchanged\nunresolved\nskipped",
    "label": "Action",
    "in_list_view": 1
   }

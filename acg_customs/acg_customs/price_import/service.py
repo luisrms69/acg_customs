@@ -15,6 +15,9 @@ import io
 import frappe
 from frappe import _
 
+from acg_customs.acg_customs.doctype.acg_external_code_exclusion.acg_external_code_exclusion import (
+	is_excluded,
+)
 from acg_customs.acg_customs.order_import import resolver
 from acg_customs.acg_customs.price_import import parser
 
@@ -55,6 +58,7 @@ def analyze(doc):
 		"total_rows": 0,
 		"resolved": 0,
 		"unresolved": 0,
+		"skipped": 0,
 		"new": 0,
 		"changed": 0,
 		"unchanged": 0,
@@ -133,6 +137,21 @@ def analyze(doc):
 		fcost, desc = by_code[code]
 		res = resolver.resolve_product(doc.customer, code)
 		if res["status"] != "ok":
+			# Fuera de catalogo confirmado -> skipped (no es error, no provoca FAIL).
+			if is_excluded(doc.customer, code):
+				summary["skipped"] += 1
+				warnings.append(_("CODIGO {0}: omitido (fuera de catalogo).").format(code))
+				lines.append(
+					{
+						"code": code,
+						"item": None,
+						"description": desc,
+						"previous_rate": None,
+						"new_rate": fcost,
+						"action": "skipped",
+					}
+				)
+				continue
 			summary["unresolved"] += 1
 			msg = "Item inexistente" if res["status"] == "missing" else f"Item ambiguo ({res['candidates']})"
 			errors.append(_("CODIGO {0}: {1}.").format(code, msg))
@@ -216,6 +235,9 @@ def apply_prices(price_import: str) -> dict:
 	try:
 		applied_new = applied_changed = 0
 		for ln in lines:
+			# Garantia explicita: una linea omitida (fuera de catalogo) nunca crea/modifica Item Price.
+			if ln["action"] == "skipped":
+				continue
 			if ln["action"] == "new":
 				frappe.get_doc(
 					{
