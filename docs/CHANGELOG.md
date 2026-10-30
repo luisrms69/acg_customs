@@ -1,6 +1,6 @@
 # Changelog — acg_customs
 
-## [Unreleased]
+## [0.1.0] — 2026-10-30
 
 ### Added
 - Infraestructura comun del importador de pedidos: DocTypes `ACG Order Provider`,
@@ -28,11 +28,34 @@
   el branch mapping; qty = cantidad original. Idempotente por `(import, external_branch_code)`,
   transaccional (savepoint + rollback, fail-closed) y segregado (`check_permission`). Cada OV se
   registra en `ACG Order Import Sales Order`.
+- GUI minima de `ACG Order Import`: botones de preflight / crear Sales Orders, indicadores de
+  estado en la lista y panel HTML con el resumen de preflight.
+- Dimension contable de proveedor: Accounting Dimension nativa `ACG Order Provider` que crea el
+  campo `acg_order_provider` en Sales Order / Sales Invoice (asegurada idempotente en
+  `after_migrate`); las Sales Orders generadas quedan etiquetadas por proveedor.
+- Pricing nativo en Sales Orders: la OV toma `selling_price_list` desde
+  `Customer.default_price_list` (Price List nativa) en vez de forzar `rate=0`; fail-closed ante
+  precio faltante (rollback transaccional).
+- Importador semanal de precios: DocType `ACG Price Import` y su tabla hija `ACG Price Import Line`.
+  Preflight fail-closed (estructura, CODIGO/COSTO validos, duplicados conflictivos, Item
+  inexistente/ambiguo) con resolucion `CODIGO -> Item` por `Item Customer Detail.ref_code`; apply
+  transaccional que hace upsert de un `Item Price` vigente por `(Item, Price List)`, con comparativo
+  `previous/new/action` para auditoria, idempotencia por estado + SHA-256, archivo adjunto privado y
+  permisos `System Manager` + `Sales Master Manager`. GUI minima (preflight / aplicar precios, panel
+  HTML, indicadores).
+- DocType `ACG External Code Exclusion` (`customer` + `external_code` + `enabled` + `reason`;
+  unicidad por `(customer, external_code)`; permisos `System Manager` + `Sales Master Manager`;
+  datos por sitio, no fixtures). El preflight de precios marca como `skipped` los codigos no
+  resueltos que tengan exclusion activa (no son error, no provocan FAIL, suman `summary.skipped` y
+  conservan datos para auditoria); el resto de no resueltos sigue en FAIL sin ocultar otros errores.
 
 ### Changed
 - `ACG Order Provider`: campos `customer` y `company` (config por sitio).
-- `ACG Order Import.status`: nuevo estado `Applied`.
+- `ACG Order Import.status`: estado inicial `Uploaded` (antes `Draft`) y nuevo estado `Applied`;
+  campo `preflight_report_html` para el panel de resultado.
 - `ACG Order Import Sales Order`: campos `external_branch_code` y `address` (auditoria/idempotencia).
+- `order_import/apply.py`: fija `selling_price_list` desde el Customer y retira el `rate=0` forzado.
+- `ACG Price Import Line.action`: amplia opciones con `skipped`.
 
 ### Dependencias
 - `required_apps = ["erpnext"]`. La facturacion con addenda del cliente es un paso posterior que vive
