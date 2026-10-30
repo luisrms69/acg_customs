@@ -23,6 +23,34 @@ class ACGOrderImport(Document):
 	def validate(self):
 		self._process_source_file()
 
+	def on_update(self):
+		self._bind_source_file()
+
+	def _bind_source_file(self):
+		"""Liga explicitamente el File privado a este documento (attached_to_*).
+
+		No depender del auto-attach del core (su momento/comportamiento varia entre
+		versiones de Frappe): la segregacion del File privado (descarga cruzada denegada)
+		requiere que el archivo quede adjunto a ESTE ACG Order Import. Idempotente."""
+		file_doc = self._resolve_file_doc()
+		if not file_doc:
+			return
+		if (
+			file_doc.attached_to_doctype != self.doctype
+			or file_doc.attached_to_name != self.name
+			or not file_doc.is_private
+		):
+			frappe.db.set_value(
+				"File",
+				file_doc.name,
+				{
+					"attached_to_doctype": self.doctype,
+					"attached_to_name": self.name,
+					"attached_to_field": ORIGINAL_FILE_FIELD,
+					"is_private": 1,
+				},
+			)
+
 	# ------------------------------------------------------------------
 	# Segregacion de proveedor (server-side, fail-closed)
 	# ------------------------------------------------------------------

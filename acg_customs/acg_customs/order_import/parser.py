@@ -186,7 +186,9 @@ def parse_workbook(wb, spec):
 
 	if unkeyed_branches:
 		warnings.append(
-			f"{len(unkeyed_branches)} columna(s) con nombre de sucursal pero sin clave en la fila de codigo."
+			f"{len(unkeyed_branches)} columna(s) con nombre de sucursal pero con la celda de clave VACIA: "
+			f"se ignoran y no generan Sales Order. Si alguna trae pedido (cantidad), esa cantidad se "
+			f"reporta como error aparte y no se asigna a ninguna sucursal. Revisar si falta la clave."
 		)
 
 	return {
