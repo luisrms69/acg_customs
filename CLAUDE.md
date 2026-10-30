@@ -56,7 +56,20 @@ Personalizaciones para ERPNext/Frappe clientes CNAP
 
 ## DocTypes principales
 
-*(pendiente de documentar al implementar)*
+**Importador de pedidos**
+- `ACG Order Provider` — perfil de proveedor (Customer + Company por sitio). Base de la segregación.
+- `ACG Order Provider User` — asociación usuario→proveedor (única fuente para `get_user_provider`).
+- `ACG Order Import` — carga del Excel de pedido; preflight/apply; estados `Uploaded → Preflight Passed/Failed → Applied`.
+- `ACG Order Import Sales Order` (child) — auditoría/idempotencia de las OV creadas por import.
+- `ACG Order Branch Mapping` — `(customer, external_branch_code) → Address Shipping`, determinista y fail-closed.
+
+**Importador de precios**
+- `ACG Price Import` — carga semanal de costos; preflight fail-closed + apply transaccional de `Item Price`; permisos System Manager + Sales Master Manager.
+- `ACG Price Import Line` (child) — comparativo por código: `action ∈ {new, changed, unchanged, unresolved, skipped}`.
+- `ACG External Code Exclusion` — códigos fuera de catálogo por `(customer, external_code)`; alimenta `skipped` en el preflight de precios.
+
+**Dimensión contable**
+- Accounting Dimension nativa `ACG Order Provider` → campo `acg_order_provider` en Sales Order / Sales Invoice (asegurada en `after_migrate`).
 
 ---
 
