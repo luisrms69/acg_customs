@@ -1,0 +1,173 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "ACG-ORD-IMP-.#####",
+ "creation": "2026-09-30 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "provider",
+  "status",
+  "source_section",
+  "excel_file",
+  "original_filename",
+  "file_sha256",
+  "audit_section",
+  "uploaded_by",
+  "column_break_audit",
+  "uploaded_on",
+  "preflight_section",
+  "preflight_report_html",
+  "preflight_summary",
+  "errors",
+  "so_section",
+  "sales_orders"
+ ],
+ "fields": [
+  {
+   "fieldname": "provider",
+   "fieldtype": "Link",
+   "options": "ACG Order Provider",
+   "label": "Provider",
+   "reqd": 1,
+   "set_only_once": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "description": "Determinado y validado server-side. El valor enviado por el cliente nunca es fuente de verdad para usuarios proveedor."
+  },
+  {
+   "default": "Uploaded",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nUploaded\nPreflight Passed\nPreflight Failed\nApplied\nError",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "source_section",
+   "fieldtype": "Section Break",
+   "label": "Archivo origen"
+  },
+  {
+   "fieldname": "excel_file",
+   "fieldtype": "Attach",
+   "label": "Excel original",
+   "reqd": 1,
+   "set_only_once": 1,
+   "description": "Se conserva como Private File. No se modifica ni se reemplaza silenciosamente."
+  },
+  {
+   "fieldname": "original_filename",
+   "fieldtype": "Data",
+   "label": "Nombre original",
+   "read_only": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "file_sha256",
+   "fieldtype": "Data",
+   "label": "SHA-256",
+   "length": 64,
+   "read_only": 1,
+   "set_only_once": 1,
+   "description": "SHA-256 calculado sobre los bytes originales del archivo."
+  },
+  {
+   "fieldname": "audit_section",
+   "fieldtype": "Section Break",
+   "label": "Auditoria"
+  },
+  {
+   "fieldname": "uploaded_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Cargado por",
+   "read_only": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "column_break_audit",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "uploaded_on",
+   "fieldtype": "Datetime",
+   "label": "Fecha de carga",
+   "read_only": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "preflight_section",
+   "fieldtype": "Section Break",
+   "label": "Preflight / Resultado"
+  },
+  {
+   "fieldname": "preflight_report_html",
+   "fieldtype": "HTML",
+   "label": "Resultado preflight"
+  },
+  {
+   "fieldname": "preflight_summary",
+   "fieldtype": "Code",
+   "options": "JSON",
+   "label": "Resumen preflight (JSON)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "errors",
+   "fieldtype": "Long Text",
+   "label": "Errores",
+   "read_only": 1
+  },
+  {
+   "fieldname": "so_section",
+   "fieldtype": "Section Break",
+   "label": "Sales Orders generadas"
+  },
+  {
+   "fieldname": "sales_orders",
+   "fieldtype": "Table",
+   "options": "ACG Order Import Sales Order",
+   "label": "Sales Orders",
+   "read_only": 1,
+   "description": "Referencia estable y auditable import -> Sales Order. La cantidad original solicitada vive en la SO y no se sobrescribe."
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-30 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Acg Customs",
+ "name": "ACG Order Import",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "ACG Order Importer",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

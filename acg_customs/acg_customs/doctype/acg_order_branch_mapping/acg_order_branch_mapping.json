@@ -1,0 +1,95 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-10-01 00:00:00.000000",
+ "description": "Mapeo determinista clave de sucursal del Excel -> Address Shipping de ERPNext, por Customer. Fuente de verdad operativa de la resolucion de sucursal del importador. Mantenido solo por System Manager.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "customer",
+  "external_branch_code",
+  "address",
+  "enabled",
+  "branch_label",
+  "mapping_key"
+ ],
+ "fields": [
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "options": "Customer",
+   "label": "Customer",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "external_branch_code",
+   "fieldtype": "Data",
+   "label": "External Branch Code",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "description": "Clave/numero de sucursal tal como aparece en el Excel del proveedor (match exacto)."
+  },
+  {
+   "fieldname": "address",
+   "fieldtype": "Link",
+   "options": "Address",
+   "label": "Address",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Address tipo Shipping ligado al Customer. Debe existir; no se crea automaticamente."
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "branch_label",
+   "fieldtype": "Data",
+   "label": "Branch Label",
+   "description": "Nombre legible de la sucursal (solo auditoria/display)."
+  },
+  {
+   "fieldname": "mapping_key",
+   "fieldtype": "Data",
+   "label": "Mapping Key",
+   "hidden": 1,
+   "read_only": 1,
+   "unique": 1,
+   "no_copy": 1,
+   "description": "Clave compuesta interna (customer + external_branch_code) para integridad; no editar."
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Acg Customs",
+ "name": "ACG Order Branch Mapping",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "import": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

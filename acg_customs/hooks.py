@@ -8,7 +8,7 @@ app_license = "mit"
 # Apps
 # ------------------
 
-# required_apps = []
+required_apps = ["erpnext"]
 
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [
@@ -262,3 +262,22 @@ app_license = "mit"
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
 
+
+# ======================================================================
+# ACG Order Import — segregacion por proveedor (server-side, fail-closed)
+# ======================================================================
+
+# Configuracion idempotente (rol de importador generico).
+after_migrate = "acg_customs.setup.install.after_migrate"
+
+# Capas 1 y 3: filtrado de lista. ANDea con las condiciones nativas (incl. File).
+permission_query_conditions = {
+	"ACG Order Import": "acg_customs.permissions.order_import_query_conditions",
+	"File": "acg_customs.permissions.file_query_conditions",
+}
+
+# Capas 2 y 4: gate por registro. Semantica deny-only (solo puede endurecer).
+has_permission = {
+	"ACG Order Import": "acg_customs.permissions.order_import_has_permission",
+	"File": "acg_customs.permissions.file_has_permission",
+}

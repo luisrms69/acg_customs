@@ -1,0 +1,182 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "ACG-PRC-IMP-.#####",
+ "creation": "2026-10-04 00:00:00.000000",
+ "description": "Importador semanal de precios de venta (Price List). Separado del importador de pedidos.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "customer",
+  "price_list",
+  "status",
+  "source_section",
+  "excel_file",
+  "original_filename",
+  "file_sha256",
+  "audit_section",
+  "uploaded_by",
+  "column_break_audit",
+  "uploaded_on",
+  "result_section",
+  "preflight_report_html",
+  "preflight_summary",
+  "errors",
+  "lines_section",
+  "lines"
+ ],
+ "fields": [
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "options": "Customer",
+   "label": "Customer",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "price_list",
+   "fieldtype": "Link",
+   "options": "Price List",
+   "label": "Price List",
+   "read_only": 1,
+   "in_list_view": 1,
+   "description": "Tomada del Customer (default_price_list) si no se especifica."
+  },
+  {
+   "default": "Uploaded",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "options": "Uploaded\nPreflight Passed\nPreflight Failed\nApplied\nError",
+   "label": "Status",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "source_section",
+   "fieldtype": "Section Break",
+   "label": "Archivo origen"
+  },
+  {
+   "fieldname": "excel_file",
+   "fieldtype": "Attach",
+   "label": "Excel de precios",
+   "reqd": 1,
+   "set_only_once": 1,
+   "description": "Private File. No se modifica ni se reemplaza."
+  },
+  {
+   "fieldname": "original_filename",
+   "fieldtype": "Data",
+   "label": "Nombre original",
+   "read_only": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "file_sha256",
+   "fieldtype": "Data",
+   "label": "SHA-256",
+   "length": 64,
+   "read_only": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "audit_section",
+   "fieldtype": "Section Break",
+   "label": "Auditoria"
+  },
+  {
+   "fieldname": "uploaded_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Cargado por",
+   "read_only": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "column_break_audit",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "uploaded_on",
+   "fieldtype": "Datetime",
+   "label": "Fecha de carga",
+   "read_only": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "result_section",
+   "fieldtype": "Section Break",
+   "label": "Preflight / Resultado"
+  },
+  {
+   "fieldname": "preflight_report_html",
+   "fieldtype": "HTML",
+   "label": "Resultado preflight"
+  },
+  {
+   "fieldname": "preflight_summary",
+   "fieldtype": "Code",
+   "options": "JSON",
+   "label": "Resumen (JSON)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "errors",
+   "fieldtype": "Long Text",
+   "label": "Errores",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lines_section",
+   "fieldtype": "Section Break",
+   "label": "Comparativo de precios"
+  },
+  {
+   "fieldname": "lines",
+   "fieldtype": "Table",
+   "options": "ACG Price Import Line",
+   "label": "Lineas",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Acg Customs",
+ "name": "ACG Price Import",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Master Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
