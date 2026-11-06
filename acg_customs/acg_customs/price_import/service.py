@@ -4,9 +4,13 @@
 """Preflight + apply del importador semanal de precios.
 
 - Resuelve CODIGO -> Item por Item Customer Detail.ref_code (reutiliza el resolver de pedidos).
+- Seleccion de semana fail-closed: si el libro trae varias hojas, exige `sheet_name` explicito;
+  la vigencia (valid_from) debe confirmarse antes de aplicar.
 - Preflight fail-closed: estructura, CODIGO/COSTO validos, duplicados conflictivos, Item inexistente/ambiguo.
-- Apply transaccional: upsert de UN Item Price vigente por (Item, Price List); registra comparativo
-  (previous/new/action) en la child table. Idempotente (status + SHA-256). No crea Items, no toca ICD.
+- Vigencia nativa: cada corrida escribe Item Price con valid_from/valid_upto. NO sobrescribe otras
+  ventanas (conserva el historico). Idempotente por ventana (Item, Price List, valid_from).
+- Advierte variaciones de precio por encima de un umbral configurable y solapamientos de vigencia.
+- Apply transaccional. No crea Items, no toca ICD.
 """
 
 import hashlib
@@ -14,6 +18,7 @@ import io
 
 import frappe
 from frappe import _
+from frappe.utils import add_days, flt, getdate
 
 from acg_customs.acg_customs.doctype.acg_external_code_exclusion.acg_external_code_exclusion import (
 	is_excluded,
@@ -47,14 +52,61 @@ def _valid_cost(v):
 		return (False, 0.0)
 
 
+def _window_rate(item, price_list, valid_from):
+	"""Rate del Item Price de la MISMA ventana (item, price_list, valid_from), o None."""
+	return frappe.db.get_value(
+		ITEM_PRICE_DT,
+		{"item_code": item, "price_list": price_list, "valid_from": valid_from},
+		"price_list_rate",
+	)
+
+
+def _prior_rate(item, price_list, valid_from):
+	"""Rate vigente ANTES de `valid_from`: la ventana con mayor valid_from < D (o sin fecha)."""
+	rows = frappe.get_all(
+		ITEM_PRICE_DT,
+		filters={"item_code": item, "price_list": price_list},
+		fields=["price_list_rate", "valid_from"],
+		order_by="valid_from desc",
+	)
+	d = getdate(valid_from)
+	for r in rows:
+		if r.valid_from is None or getdate(r.valid_from) < d:
+			return r.price_list_rate
+	return None
+
+
+def _overlaps(item, price_list, valid_from, valid_upto):
+	"""¿Existe otra ventana (distinto valid_from) que se solape con [valid_from, valid_upto]?"""
+	d1, d2 = getdate(valid_from), getdate(valid_upto) if valid_upto else None
+	for r in frappe.get_all(
+		ITEM_PRICE_DT,
+		filters={"item_code": item, "price_list": price_list},
+		fields=["valid_from", "valid_upto"],
+	):
+		if r.valid_from is not None and getdate(r.valid_from) == d1:
+			continue  # misma ventana (se actualiza, no es solape)
+		rf = getdate(r.valid_from) if r.valid_from else None
+		ru = getdate(r.valid_upto) if r.valid_upto else None
+		# solape de intervalos [rf, ru] con [d1, d2] (None = abierto)
+		if (ru is None or d1 <= ru) and (d2 is None or rf is None or rf <= d2):
+			return True
+	return False
+
+
 def analyze(doc):
 	"""Devuelve (summary, lines) sin escribir Item Price. Deterministico."""
+	threshold = flt(doc.variation_threshold_pct) or 20.0
 	summary = {
 		"customer": doc.customer,
 		"price_list": doc.price_list,
 		"file_sha256": doc.file_sha256,
 		"sheet": None,
+		"candidate_sheets": [],
 		"header_row": None,
+		"valid_from": str(doc.valid_from) if doc.valid_from else None,
+		"valid_upto": str(doc.valid_upto) if doc.valid_upto else None,
+		"threshold_pct": threshold,
 		"total_rows": 0,
 		"resolved": 0,
 		"unresolved": 0,
@@ -62,6 +114,7 @@ def analyze(doc):
 		"new": 0,
 		"changed": 0,
 		"unchanged": 0,
+		"abnormal": 0,
 		"errors": [],
 		"warnings": [],
 		"result": "FAIL",
@@ -73,6 +126,12 @@ def analyze(doc):
 		errors.append(_("Sin Customer."))
 	if not doc.price_list:
 		errors.append(_("Sin Price List."))
+
+	# --- Confirmacion de periodo (vigencia) obligatoria ---
+	if not doc.valid_from:
+		errors.append(_("Confirme el periodo: 'Vigente desde' (valid_from) es obligatorio."))
+	elif doc.valid_upto and getdate(doc.valid_upto) < getdate(doc.valid_from):
+		errors.append(_("'Vigente hasta' no puede ser anterior a 'Vigente desde'."))
 
 	content, sha = _load_content(doc)
 	if content is None:
@@ -97,8 +156,9 @@ def analyze(doc):
 		errors.append(_("No se pudo abrir el Excel: {0}").format(str(exc)[:200]))
 		return summary, []
 
-	parsed = parser.parse_workbook(wb)
+	parsed = parser.parse_workbook(wb, doc.sheet_name or None)
 	summary["sheet"] = parsed["sheet"]
+	summary["candidate_sheets"] = parsed["candidate_sheets"]
 	summary["header_row"] = parsed["header_row"]
 	errors.extend(parsed["structural_errors"])
 	if parsed["structural_errors"]:
@@ -168,18 +228,43 @@ def analyze(doc):
 			continue
 		item = res["item"]
 		summary["resolved"] += 1
-		prev = frappe.db.get_value(
-			ITEM_PRICE_DT, {"item_code": item, "price_list": doc.price_list}, "price_list_rate"
-		)
-		if prev is None:
+
+		# Comparativo POR VENTANA (no sobrescribe otras vigencias):
+		# - misma ventana (mismo valid_from) ya existe -> changed/unchanged;
+		# - no existe esa ventana -> new (y 'previous' = precio vigente anterior, para la variacion).
+		same = _window_rate(item, doc.price_list, doc.valid_from)
+		if same is not None:
+			prev = same
+			if abs(float(same) - fcost) > 1e-9:
+				action = "changed"
+				summary["changed"] += 1
+			else:
+				action = "unchanged"
+				summary["unchanged"] += 1
+		else:
+			prev = _prior_rate(item, doc.price_list, doc.valid_from)
 			action = "new"
 			summary["new"] += 1
-		elif abs(float(prev) - fcost) > 1e-9:
-			action = "changed"
-			summary["changed"] += 1
-		else:
-			action = "unchanged"
-			summary["unchanged"] += 1
+
+		variation = None
+		abnormal = 0
+		if prev not in (None, 0):
+			variation = (fcost - float(prev)) / float(prev) * 100.0
+			if abs(variation) > threshold:
+				abnormal = 1
+				summary["abnormal"] += 1
+				warnings.append(
+					_("CODIGO {0} ({1}): variacion {2:.1f}% supera el umbral {3:.0f}% ({4} -> {5}).").format(
+						code, item, variation, threshold, prev, fcost
+					)
+				)
+
+		# Solapamiento de vigencia con otra ventana distinta -> aviso (no destructivo).
+		if action == "new" and _overlaps(item, doc.price_list, doc.valid_from, doc.valid_upto):
+			warnings.append(
+				_("CODIGO {0} ({1}): la vigencia se solapa con otra ventana existente.").format(code, item)
+			)
+
 		lines.append(
 			{
 				"code": code,
@@ -187,6 +272,10 @@ def analyze(doc):
 				"description": desc,
 				"previous_rate": prev,
 				"new_rate": fcost,
+				"variation_pct": variation,
+				"abnormal": abnormal,
+				"valid_from": doc.valid_from,
+				"valid_upto": doc.valid_upto,
 				"action": action,
 			}
 		)
@@ -239,20 +328,28 @@ def apply_prices(price_import: str) -> dict:
 			if ln["action"] == "skipped":
 				continue
 			if ln["action"] == "new":
+				# Nueva VENTANA de vigencia. No toca otras ventanas -> conserva el historico.
 				frappe.get_doc(
 					{
 						"doctype": ITEM_PRICE_DT,
 						"item_code": ln["item"],
 						"price_list": doc.price_list,
 						"price_list_rate": ln["new_rate"],
+						"valid_from": doc.valid_from,
+						"valid_upto": doc.valid_upto,
 					}
 				).insert(ignore_permissions=True)
 				applied_new += 1
 			elif ln["action"] == "changed":
+				# Correccion de la MISMA ventana (mismo valid_from); no crea una ventana nueva.
 				name = frappe.db.get_value(
-					ITEM_PRICE_DT, {"item_code": ln["item"], "price_list": doc.price_list}, "name"
+					ITEM_PRICE_DT,
+					{"item_code": ln["item"], "price_list": doc.price_list, "valid_from": doc.valid_from},
+					"name",
 				)
-				frappe.db.set_value(ITEM_PRICE_DT, name, "price_list_rate", ln["new_rate"])
+				frappe.db.set_value(
+					ITEM_PRICE_DT, name, {"price_list_rate": ln["new_rate"], "valid_upto": doc.valid_upto}
+				)
 				applied_changed += 1
 		_persist(doc, summary, lines, "Applied")
 	except Exception:

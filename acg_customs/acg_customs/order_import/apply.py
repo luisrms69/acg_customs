@@ -55,8 +55,9 @@ def _build_plan(parsed, customer):
 PROVIDER_DIMENSION_FIELD = "acg_order_provider"  # Accounting Dimension nativa (proveedor)
 
 
-def _create_sales_order(customer, company, address, items, provider, price_list):
-	today = frappe.utils.nowdate()
+def _create_sales_order(customer, company, address, items, provider, price_list, order_date=None):
+	# La fecha del pedido determina transaction_date -> seleccion de precio vigente nativa por fecha.
+	today = order_date or frappe.utils.nowdate()
 	so = frappe.get_doc(
 		{
 			"doctype": "Sales Order",
@@ -157,7 +158,13 @@ def create_sales_orders(order_import: str) -> dict:
 			if code in existing_codes:
 				continue
 			so = _create_sales_order(
-				customer, company, plan[code]["address"], plan[code]["items"], doc.provider, price_list
+				customer,
+				company,
+				plan[code]["address"],
+				plan[code]["items"],
+				doc.provider,
+				price_list,
+				doc.order_date,
 			)
 			# Gate fail-closed de precio: tras el pricing nativo, ninguna linea puede quedar en rate 0.
 			for it in so.items:

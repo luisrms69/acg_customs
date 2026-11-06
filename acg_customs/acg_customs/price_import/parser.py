@@ -3,11 +3,18 @@
 
 """Parser del archivo semanal de precios.
 
-La hoja trae uno o VARIOS bloques de columnas con el mismo encabezado
+Responsabilidad UNICA: extraer datos del XLS. No conoce precios, vigencias ni
+logica de ERPNext.
+
+Una hoja trae uno o VARIOS bloques de columnas con el mismo encabezado
 CODIGO | DESCRIPCION | COSTO (COSTO = precio de venta), colocados lado a lado
 (p. ej. A-C y E-G). Se detectan TODOS los bloques en la fila de encabezado y se
-leen las filas de cada uno, concatenando los productos. Deteccion por etiquetas
-(no hardcodea nombre de hoja ni numero de fila ni numero de bloques)."""
+leen las filas de cada uno, concatenando los productos.
+
+Seleccion de hoja FAIL-CLOSED: si el libro trae mas de una hoja con encabezado
+de precios, NUNCA se elige una automaticamente; se exige `sheet_name` explicito.
+La deteccion es por etiquetas (no hardcodea nombre de hoja ni numero de fila ni
+numero de bloques)."""
 
 HEADER_LABELS = ("codigo", "descripcion", "costo")  # triplete esperado (normalizado)
 _SCAN_ROWS = 10
@@ -43,31 +50,22 @@ def _blocks_in_row(ws, r):
 	return cols
 
 
-def find_header(wb):
-	"""Devuelve (sheet, header_row, blocks) de la primera hoja/fila cuyo encabezado
-	contiene al menos un triplete CODIGO|DESCRIPCION|COSTO; o (None, None, [])."""
-	for sn in wb.sheetnames:
-		ws = wb[sn]
-		limit = min(_SCAN_ROWS, ws.max_row or _SCAN_ROWS)
-		for r in range(1, limit + 1):
-			blocks = _blocks_in_row(ws, r)
-			if blocks:
-				return sn, r, blocks
-	return None, None, []
+def _header_in_sheet(ws):
+	"""(header_row, blocks) de la primera fila con >=1 triplete; o (None, [])."""
+	limit = min(_SCAN_ROWS, ws.max_row or _SCAN_ROWS)
+	for r in range(1, limit + 1):
+		blocks = _blocks_in_row(ws, r)
+		if blocks:
+			return r, blocks
+	return None, []
 
 
-def parse_workbook(wb):
-	sheet, header_row, blocks = find_header(wb)
-	if sheet is None:
-		return {
-			"sheet": None,
-			"header_row": None,
-			"blocks": 0,
-			"rows": [],
-			"structural_errors": ["Estructura no reconocida (se esperaba CODIGO | DESCRIPCION | COSTO)."],
-		}
+def list_price_sheets(wb):
+	"""Nombres de hojas que contienen un encabezado de precios valido (candidatas)."""
+	return [sn for sn in wb.sheetnames if _header_in_sheet(wb[sn])[0]]
 
-	ws = wb[sheet]
+
+def _read_sheet(ws, header_row, blocks):
 	rows = []
 	max_row = ws.max_row or header_row
 	# Cada bloque se lee de forma independiente (puede terminar en distinta fila).
@@ -92,10 +90,59 @@ def parse_workbook(wb):
 					"cost": cost,
 				}
 			)
+	return rows
+
+
+def _empty(candidates, errors):
 	return {
-		"sheet": sheet,
+		"sheet": None,
+		"header_row": None,
+		"blocks": 0,
+		"rows": [],
+		"candidate_sheets": candidates,
+		"structural_errors": errors,
+	}
+
+
+def parse_workbook(wb, sheet_name=None):
+	"""Extraccion pura de (code, description, cost) por hoja.
+
+	- Sin hoja candidata -> error estructural.
+	- `sheet_name` None y UNA sola candidata -> se usa esa.
+	- `sheet_name` None y VARIAS candidatas -> error (exige seleccion explicita).
+	- `sheet_name` dado que no es candidata valida -> error.
+	"""
+	candidates = list_price_sheets(wb)
+	if not candidates:
+		return _empty([], ["Estructura no reconocida (se esperaba CODIGO | DESCRIPCION | COSTO)."])
+
+	if sheet_name is None:
+		if len(candidates) > 1:
+			return _empty(
+				candidates,
+				[
+					"El libro contiene varias hojas de precios ({0}). "
+					"Seleccione explicitamente la semana/hoja a importar.".format(", ".join(candidates))
+				],
+			)
+		sheet_name = candidates[0]
+	elif sheet_name not in candidates:
+		return _empty(
+			candidates,
+			[
+				"La hoja seleccionada '{0}' no contiene un encabezado de precios valido. "
+				"Hojas disponibles: {1}.".format(sheet_name, ", ".join(candidates))
+			],
+		)
+
+	ws = wb[sheet_name]
+	header_row, blocks = _header_in_sheet(ws)
+	rows = _read_sheet(ws, header_row, blocks)
+	return {
+		"sheet": sheet_name,
 		"header_row": header_row,
 		"blocks": len(blocks),
 		"rows": rows,
+		"candidate_sheets": candidates,
 		"structural_errors": [],
 	}

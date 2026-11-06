@@ -102,6 +102,11 @@ class TestApply(FrappeTestCase):
 		cls.user = _ensure_user(USER, PROVIDER)
 		cls.user2 = _ensure_user(USER2, PROVIDER2)
 
+	def setUp(self):
+		# ITEM_NP se usa solo en los tests de cobertura de precio por fecha; aislarlo
+		# entre tests para que una ventana creada en uno no contamine a otro.
+		frappe.db.delete("Item Price", {"item_code": ITEM_NP, "price_list": PRICE_LIST})
+
 	def tearDown(self):
 		frappe.set_user("Administrator")
 
@@ -235,19 +240,68 @@ class TestApply(FrappeTestCase):
 		self.assertEqual(rates[ITEM_B], RATE_B)
 		self.assertEqual(so2.grand_total, RATE_A * 2 + RATE_B * 3)
 
-	# Fail-closed por precio faltante: Item resoluble pero SIN Item Price -> no se crean OVs
+	# Fail-closed por precio faltante: ahora el PREFLIGHT lo detecta (issue #2), antes de crear OV.
 	def test_missing_price_fails_closed(self):
 		wb = build_workbook(
 			[{"code": BRANCH_1, "name": "B1"}], [{"plu": PLU_NP, "articulo": "SIN PRECIO"}], {(0, 0): 4}
 		)
-		doc = self._passed_import(wb)  # preflight PASS (resuelve por ICD)
+		doc = _make_import(PROVIDER, wb)
+		preflight.run_preflight(doc.name)
+		doc.reload()
+		# El preflight bloquea: ITEM_NP resuelve por ICD pero no tiene Item Price vigente.
+		self.assertEqual(doc.status, "Preflight Failed")
+		summary = frappe.parse_json(doc.preflight_summary)
+		self.assertTrue(any(p["item"] == ITEM_NP for p in summary["products_without_price"]))
+		# Defensa en profundidad: apply tambien rechaza (no esta en Preflight Passed).
 		before = frappe.db.count("Sales Order")
 		with self.assertRaises(frappe.ValidationError):
 			apply.create_sales_orders(doc.name)
 		doc.reload()
 		self.assertNotEqual(doc.status, "Applied")
 		self.assertEqual(len(doc.sales_orders), 0)
-		self.assertEqual(frappe.db.count("Sales Order"), before)  # rollback total
+		self.assertEqual(frappe.db.count("Sales Order"), before)
+
+	# NO FALLBACK: un precio con vigencia fuera de la fecha del pedido NO sirve -> preflight FAIL.
+	def test_price_outside_validity_blocks(self):
+		frappe.get_doc(
+			{
+				"doctype": "Item Price",
+				"item_code": ITEM_NP,
+				"price_list": PRICE_LIST,
+				"price_list_rate": 7.0,
+				"valid_from": "2020-01-01",
+				"valid_upto": "2020-01-07",
+			}
+		).insert(ignore_permissions=True)
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}], [{"plu": PLU_NP, "articulo": "VIEJO"}], {(0, 0): 2}
+		)
+		doc = _make_import(PROVIDER, wb)  # order_date = hoy (default)
+		preflight.run_preflight(doc.name)
+		doc.reload()
+		self.assertEqual(doc.status, "Preflight Failed")
+		summary = frappe.parse_json(doc.preflight_summary)
+		self.assertTrue(any(p["item"] == ITEM_NP for p in summary["products_without_price"]))
+
+	# POSITIVO: precio con vigencia que cubre la fecha del pedido -> PASS y rate correcto.
+	def test_dated_price_covering_date_passes(self):
+		frappe.get_doc(
+			{
+				"doctype": "Item Price",
+				"item_code": ITEM_NP,
+				"price_list": PRICE_LIST,
+				"price_list_rate": 9.0,
+				"valid_from": frappe.utils.add_days(frappe.utils.nowdate(), -3),
+				"valid_upto": frappe.utils.add_days(frappe.utils.nowdate(), 3),
+			}
+		).insert(ignore_permissions=True)
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}], [{"plu": PLU_NP, "articulo": "VIGENTE"}], {(0, 0): 2}
+		)
+		doc = self._passed_import(wb)  # ahora PASA el preflight
+		res = apply.create_sales_orders(doc.name)
+		so = frappe.get_doc("Sales Order", res["created"][0])
+		self.assertEqual(so.items[0].rate, 9.0)
 
 	# proveedor cruzado no puede aplicar importacion ajena
 	def test_cross_provider_cannot_apply(self):

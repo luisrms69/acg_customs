@@ -253,6 +253,10 @@ class TestPreflight(FrappeTestCase):
 		cls.provider2 = _ensure_provider(PROVIDER2, customer=CUSTOMER)
 		cls.user = _ensure_user(USER, PROVIDER)
 		cls.user2 = _ensure_user(USER2, PROVIDER2)
+		# Estos tests cubren resolucion estructural, no precios: fijar regimen "sin lista de
+		# precios" para que el check de precio-vigente del preflight (gateado a default_price_list)
+		# no aplique aqui. Determinista frente a contaminacion cruzada de otras clases.
+		frappe.db.set_value("Customer", CUSTOMER, "default_price_list", None)
 
 	def tearDown(self):
 		frappe.set_user("Administrator")
