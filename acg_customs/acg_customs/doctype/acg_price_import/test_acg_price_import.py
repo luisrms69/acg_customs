@@ -47,6 +47,29 @@ def build_price_wb(rows, *, header=("CODIGO", "DESCRIPCION", "COSTO"), sheet="Ho
 	return bio.getvalue()
 
 
+def build_two_block_wb(left_rows, right_rows, *, sheet="Hoja1"):
+	"""Hoja con DOS bloques CODIGO|DESCRIPCION|COSTO lado a lado: A-C y E-G
+	(col 4 vacia de separacion), como el archivo real del cliente."""
+	wb = openpyxl.Workbook()
+	ws = wb.active
+	ws.title = sheet
+	for base in (1, 5):  # A y E
+		ws.cell(row=1, column=base, value="CODIGO")
+		ws.cell(row=1, column=base + 1, value="DESCRIPCION")
+		ws.cell(row=1, column=base + 2, value="COSTO")
+	for i, (code, desc, cost) in enumerate(left_rows, start=2):
+		ws.cell(row=i, column=1, value=code)
+		ws.cell(row=i, column=2, value=desc)
+		ws.cell(row=i, column=3, value=cost)
+	for i, (code, desc, cost) in enumerate(right_rows, start=2):
+		ws.cell(row=i, column=5, value=code)
+		ws.cell(row=i, column=6, value=desc)
+		ws.cell(row=i, column=7, value=cost)
+	bio = io.BytesIO()
+	wb.save(bio)
+	return bio.getvalue()
+
+
 def _ensure_price_list():
 	if not frappe.db.exists("Price List", PRICE_LIST):
 		frappe.get_doc(
@@ -301,3 +324,33 @@ class TestPriceImport(FrappeTestCase):
 		_, s = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))
 		self.assertIn("skipped", s)
 		self.assertEqual(s["skipped"], 0)
+
+	# 18. PARSER: hoja con DOS bloques de columnas (A-C y E-G) lee AMBOS
+	def test_parser_lee_dos_bloques(self):
+		from acg_customs.acg_customs.price_import import parser
+
+		wb_bytes = build_two_block_wb(
+			left_rows=[("1001", "IZQ UNO", 10.0), ("1002", "IZQ DOS", 20.0)],
+			right_rows=[("2001", "DER UNO", 30.0), ("2002", "DER DOS", 40.0)],
+		)
+		wb = openpyxl.load_workbook(io.BytesIO(wb_bytes), data_only=True)
+		p = parser.parse_workbook(wb)
+		self.assertEqual(p["blocks"], 2)
+		codes = {r["code"] for r in p["rows"]}
+		# los 2 del bloque izquierdo Y los 2 del derecho
+		self.assertEqual(codes, {"1001", "1002", "2001", "2002"})
+
+	# 19. INTEGRACION: preflight resuelve productos de AMBOS bloques
+	def test_preflight_resuelve_ambos_bloques(self):
+		# PLU_A en bloque izquierdo, PLU_B en bloque derecho
+		doc, s = self._pf(
+			build_two_block_wb(
+				left_rows=[(PLU_A, "ART A", 11.0)],
+				right_rows=[(PLU_B, "ART B", 22.0)],
+			)
+		)
+		self.assertEqual(s["result"], "PASS")
+		self.assertEqual(s["resolved"], 2)
+		by_item = {ln.item: ln.new_rate for ln in doc.lines}
+		self.assertEqual(by_item.get(ITEM_A), 11.0)
+		self.assertEqual(by_item.get(ITEM_B), 22.0)
