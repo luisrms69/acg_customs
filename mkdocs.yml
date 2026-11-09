@@ -33,4 +33,5 @@ nav:
       - ADR-0000 — Estado inicial: adr/0000-estado-inicial-app.md
       - ADR-0001 — Vigencia nativa de precios: adr/0001-vigencia-nativa-item-price.md
       - ADR-0002 — Conciliación de OV (Opción B): adr/0002-conciliacion-ov-opcion-b.md
+      - ADR-0003 — Modelo temporal de Item Price: adr/0003-modelo-temporal-item-price.md
   - Changelog: CHANGELOG.md
