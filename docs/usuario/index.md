@@ -6,8 +6,8 @@ incorrectos.
 
 ## Flujos
 
-- [Importador de precios](importador-precios.md) — carga del Excel semanal de costos,
-  selección de semana, vigencia y detección de variaciones.
+- [Importador de precios](importador-precios.md) — carga del Excel semanal de costos (una
+  hoja por archivo), vigencia e histórico, y detección de variaciones.
 - [Importador de pedidos](importador-pedidos.md) — carga del pedido del proveedor y
   generación de Órdenes de Venta por sucursal con precio vigente a la fecha.
 - [Conciliación de totales de OV](conciliacion-ov.md) — verificación posterior del

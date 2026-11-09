@@ -6,13 +6,13 @@
 - Importador de precios multi-bloque: el parser lee **todos** los bloques de columnas
   `CODIGO | DESCRIPCION | COSTO` de la hoja (antes solo el primero, dejando sin
   actualizar ~la mitad del catálogo).
-- Selección de semana *fail-closed* en `ACG Price Import`: si el libro trae varias hojas
-  de precios se exige `sheet_name` explícito (nunca se elige la primera); una sola hoja
-  exige confirmar el periodo. Campo `detected_sheets` con las hojas candidatas.
-- Vigencia nativa de precios: `valid_from`/`valid_upto` en `ACG Price Import` → se
-  escriben en `Item Price`. No sobrescribe otras ventanas (conserva histórico);
-  idempotente por `(Item, Price List, valid_from)`; soporta retroactivas y parciales;
-  advierte solapamientos. Ver ADR-0001.
+- Un archivo = una semana (*fail-closed*) en `ACG Price Import`: si el libro trae **más de
+  una hoja de precios** → **ARCHIVO INCORRECTO** (FAIL). No hay selección de hoja. Se exige
+  confirmar la vigencia del periodo (`valid_from`). Ver ADR-0001.
+- Vigencia nativa de precios con **modelo temporal** (crear / extender / cerrar): al aplicar,
+  precio nuevo → crea ventana; precio sin cambios → **conserva y extiende** (no duplica);
+  precio modificado → **cierra** la ventana anterior y crea una nueva. Recorte para no
+  solapar; retroactivas y parciales; reimport idéntico idempotente. Ver ADR-0003.
 - Detección de variación anormal: `variation_threshold_pct` (default 20%) → advertencia y
   flag `abnormal` por línea. Comparativo enriquecido (`variation_pct`, `valid_from`,
   `valid_upto` en `ACG Price Import Line`).

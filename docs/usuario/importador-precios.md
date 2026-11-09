@@ -13,27 +13,34 @@ DocType: **ACG Price Import**. Carga el Excel semanal de costos y actualiza los
 4. Si pasó, **Aplicar precios**. Se crean/actualizan los `Item Price` con la vigencia
    indicada. El estado pasa a `Applied`.
 
-## Selección de semana (obligatoria, *fail-closed*)
+## Un archivo = una semana (*fail-closed*)
 
-El archivo de precios puede traer **varias hojas** (una por semana).
+El archivo de precios debe traer **una sola hoja de precios** (la semana a importar).
 
-- **Varias hojas:** el campo **Hoja / semana** (`sheet_name`) es **obligatorio**. Si no
-  se elige, el preflight **falla** y lista las hojas candidatas (`detected_sheets`).
-  El sistema **nunca** toma la primera hoja por su cuenta.
-- **Una sola hoja:** se preselecciona, pero igual debe **confirmarse el periodo de
-  vigencia** antes de aplicar.
+- **Más de una hoja de precios → ARCHIVO INCORRECTO:** el preflight **falla** e indica
+  cuántas hojas trae. **No se selecciona** ni se elige automáticamente ninguna: debes subir
+  el archivo de la semana correspondiente. (Esto evita aplicar precios de otra semana.)
+- **Una sola hoja:** se usa esa, pero igual debes **confirmar el periodo de vigencia**
+  (`Vigente desde` / `Vigente hasta`) antes de aplicar.
 
 ## Vigencia e histórico
 
-- Campos **Vigente desde** (`valid_from`, obligatorio) y **Vigente hasta** (`valid_upto`,
-  opcional; vacío = abierto). Cada corrida escribe esos valores en el `Item Price`.
-- **No se sobrescriben** otras ventanas de vigencia: el histórico se conserva. Al
-  comprar/facturar, ERPNext elige nativamente el precio cuya vigencia cubre la fecha.
-- **Importaciones retroactivas y parciales** son válidas. Si la vigencia nueva se
-  **solapa** con otra ventana existente, se emite una **advertencia** (no se destruye
-  información).
-- **Idempotencia:** reimportar la misma semana (mismo `valid_from`) con el mismo costo
-  no duplica `Item Price`; un costo distinto en la misma ventana se marca `changed`.
+Campos **Vigente desde** (`valid_from`, obligatorio) y **Vigente hasta** (`valid_upto`,
+opcional; vacío = abierto). Al **aplicar**, el sistema no duplica ni destruye el histórico;
+compara cada producto contra su **precio vigente anterior**:
+
+| Situación | Acción sobre `Item Price` |
+|---|---|
+| **Precio nuevo** (sin precio previo) | Crea una ventana `[desde, hasta]`. |
+| **Precio sin cambios** (= al vigente anterior) | **Conserva** el registro existente y **extiende** su vigencia (no crea otro). |
+| **Precio modificado** (≠ al vigente anterior) | **Cierra** la ventana anterior (hasta el día previo) y **crea** una nueva. |
+| **Producto ausente del archivo** | No se modifica su precio. |
+
+- Al facturar, ERPNext elige nativamente el precio cuya vigencia cubre la fecha del pedido.
+- **Retroactivas y parciales** soportadas; la vigencia se **recorta** para no solaparse con
+  la ventana siguiente (sin ambigüedad).
+- **Idempotencia:** reimportar la misma semana con el mismo costo **no crea registros** ni
+  altera precios históricos.
 
 ## Variaciones anormales
 

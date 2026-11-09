@@ -15,8 +15,6 @@
   "original_filename",
   "file_sha256",
   "period_section",
-  "sheet_name",
-  "detected_sheets",
   "valid_from",
   "column_break_period",
   "valid_upto",
@@ -92,20 +90,8 @@
   {
    "fieldname": "period_section",
    "fieldtype": "Section Break",
-   "label": "Semana y vigencia"
-  },
-  {
-   "fieldname": "sheet_name",
-   "fieldtype": "Data",
-   "label": "Hoja / semana",
-   "description": "Hoja del libro a importar. Obligatoria si el libro trae varias hojas de precios."
-  },
-  {
-   "fieldname": "detected_sheets",
-   "fieldtype": "Small Text",
-   "label": "Hojas detectadas",
-   "read_only": 1,
-   "description": "Hojas con encabezado de precios validas en el archivo adjunto."
+   "label": "Vigencia",
+   "description": "El archivo debe traer UNA sola hoja de precios (una semana). Si trae varias, se rechaza."
   },
   {
    "fieldname": "valid_from",

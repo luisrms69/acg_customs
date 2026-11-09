@@ -11,10 +11,10 @@ CODIGO | DESCRIPCION | COSTO (COSTO = precio de venta), colocados lado a lado
 (p. ej. A-C y E-G). Se detectan TODOS los bloques en la fila de encabezado y se
 leen las filas de cada uno, concatenando los productos.
 
-Seleccion de hoja FAIL-CLOSED: si el libro trae mas de una hoja con encabezado
-de precios, NUNCA se elige una automaticamente; se exige `sheet_name` explicito.
-La deteccion es por etiquetas (no hardcodea nombre de hoja ni numero de fila ni
-numero de bloques)."""
+UNA SOLA SEMANA POR ARCHIVO (fail-closed): el importador acepta exclusivamente
+libros con UNA sola hoja de precios. Si el libro trae mas de una hoja con
+encabezado valido -> ARCHIVO INCORRECTO (no se elige ninguna). La deteccion es
+por etiquetas (no hardcodea nombre de hoja ni numero de fila ni numero de bloques)."""
 
 HEADER_LABELS = ("codigo", "descripcion", "costo")  # triplete esperado (normalizado)
 _SCAN_ROWS = 10
@@ -61,7 +61,7 @@ def _header_in_sheet(ws):
 
 
 def list_price_sheets(wb):
-	"""Nombres de hojas que contienen un encabezado de precios valido (candidatas)."""
+	"""Nombres de hojas que contienen un encabezado de precios valido."""
 	return [sn for sn in wb.sheetnames if _header_in_sheet(wb[sn])[0]]
 
 
@@ -93,48 +93,31 @@ def _read_sheet(ws, header_row, blocks):
 	return rows
 
 
-def _empty(candidates, errors):
-	return {
-		"sheet": None,
-		"header_row": None,
-		"blocks": 0,
-		"rows": [],
-		"candidate_sheets": candidates,
-		"structural_errors": errors,
-	}
+def _empty(errors):
+	return {"sheet": None, "header_row": None, "blocks": 0, "rows": [], "structural_errors": errors}
 
 
-def parse_workbook(wb, sheet_name=None):
-	"""Extraccion pura de (code, description, cost) por hoja.
+def parse_workbook(wb):
+	"""Extraccion pura de (code, description, cost). EXIGE una sola hoja de precios.
 
-	- Sin hoja candidata -> error estructural.
-	- `sheet_name` None y UNA sola candidata -> se usa esa.
-	- `sheet_name` None y VARIAS candidatas -> error (exige seleccion explicita).
-	- `sheet_name` dado que no es candidata valida -> error.
+	- Sin hoja de precios -> error estructural.
+	- MAS de una hoja de precios -> ARCHIVO INCORRECTO (no se elige ninguna).
+	- Exactamente una -> se lee esa.
 	"""
-	candidates = list_price_sheets(wb)
-	if not candidates:
-		return _empty([], ["Estructura no reconocida (se esperaba CODIGO | DESCRIPCION | COSTO)."])
-
-	if sheet_name is None:
-		if len(candidates) > 1:
-			return _empty(
-				candidates,
-				[
-					"El libro contiene varias hojas de precios ({0}). "
-					"Seleccione explicitamente la semana/hoja a importar.".format(", ".join(candidates))
-				],
-			)
-		sheet_name = candidates[0]
-	elif sheet_name not in candidates:
+	sheets = list_price_sheets(wb)
+	if not sheets:
+		return _empty(["Estructura no reconocida (se esperaba CODIGO | DESCRIPCION | COSTO)."])
+	if len(sheets) > 1:
 		return _empty(
-			candidates,
 			[
-				"La hoja seleccionada '{0}' no contiene un encabezado de precios valido. "
-				"Hojas disponibles: {1}.".format(sheet_name, ", ".join(candidates))
-			],
+				"Archivo incorrecto: el libro debe traer UNA sola hoja de precios (una semana); "
+				"tiene {0} hojas de precios ({1}). Suba solo el archivo de la semana a importar.".format(
+					len(sheets), ", ".join(sheets)
+				)
+			]
 		)
 
+	sheet_name = sheets[0]
 	ws = wb[sheet_name]
 	header_row, blocks = _header_in_sheet(ws)
 	rows = _read_sheet(ws, header_row, blocks)
@@ -143,6 +126,5 @@ def parse_workbook(wb, sheet_name=None):
 		"header_row": header_row,
 		"blocks": len(blocks),
 		"rows": rows,
-		"candidate_sheets": candidates,
 		"structural_errors": [],
 	}

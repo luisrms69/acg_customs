@@ -14,9 +14,7 @@ Permisos: System Manager, Sales Master Manager.
 |---|---|---|
 | `customer` | Link Customer | determina `default_price_list` |
 | `price_list` | Link Price List | tomada del Customer |
-| `sheet_name` | Data | hoja/semana a importar (obligatoria si hay varias) |
-| `detected_sheets` | Small Text | hojas candidatas detectadas (read-only) |
-| `valid_from` / `valid_upto` | Date | vigencia de la corrida (desde obligatoria) |
+| `valid_from` / `valid_upto` | Date | vigencia de la corrida (desde obligatoria). El archivo debe traer una sola hoja; multi-hoja = archivo incorrecto. |
 | `variation_threshold_pct` | Percent | umbral de variación anormal (default 20) |
 | `status` | Select | `Uploaded → Preflight Passed/Failed → Applied` |
 | `excel_file` / `file_sha256` | Attach / Data | archivo privado + hash |

@@ -112,23 +112,22 @@ def _ensure_user(email, role):
 	return email
 
 
-def _make_import(wb_bytes, *, valid_from=VALID_FROM, valid_upto=VALID_UPTO, sheet_name=None):
+def _make_import(wb_bytes, *, valid_from=VALID_FROM, valid_upto=VALID_UPTO):
 	prev = frappe.session.user
 	frappe.set_user("Administrator")
 	try:
 		f = frappe.get_doc(
 			{"doctype": "File", "file_name": "costos.xlsx", "is_private": 1, "content": wb_bytes}
 		).insert(ignore_permissions=True)
-		data = {
-			"doctype": "ACG Price Import",
-			"customer": CUSTOMER,
-			"excel_file": f.file_url,
-			"valid_from": valid_from,
-			"valid_upto": valid_upto,
-		}
-		if sheet_name:
-			data["sheet_name"] = sheet_name
-		doc = frappe.get_doc(data)
+		doc = frappe.get_doc(
+			{
+				"doctype": "ACG Price Import",
+				"customer": CUSTOMER,
+				"excel_file": f.file_url,
+				"valid_from": valid_from,
+				"valid_upto": valid_upto,
+			}
+		)
 		doc.insert(ignore_permissions=True)
 		return doc
 	finally:
@@ -384,37 +383,20 @@ class TestPriceImport(FrappeTestCase):
 		self.assertEqual(by_item.get(ITEM_A), 11.0)
 		self.assertEqual(by_item.get(ITEM_B), 22.0)
 
-	# 20. SELECCION: libro multi-hoja SIN seleccion -> FAIL (nunca elige la primera)
-	def test_multi_sheet_requires_selection(self):
+	# 20. ARCHIVO: libro multi-hoja -> FAIL (archivo incorrecto, sin seleccion)
+	def test_multi_sheet_rejected(self):
 		wb = build_multi_sheet_wb({"SEM 1": [(PLU_A, "A", 10.0)], "SEM 2": [(PLU_A, "A", 12.0)]})
-		_, s = self._pf(wb)  # _make_import no pasa sheet_name
+		_, s = self._pf(wb)
 		self.assertEqual(s["result"], "FAIL")
-		self.assertEqual(set(s["candidate_sheets"]), {"SEM 1", "SEM 2"})
+		self.assertTrue(any("incorrecto" in e.lower() for e in s["errors"]))
 
-	# 21. SELECCION: libro multi-hoja CON sheet_name valido -> usa esa hoja
-	def test_multi_sheet_explicit_selection(self):
-		wb = build_multi_sheet_wb({"SEM 1": [(PLU_A, "A", 10.0)], "SEM 2": [(PLU_A, "A", 99.0)]})
-		doc = _make_import(wb, sheet_name="SEM 2")
-		s = service.run_preflight(doc.name)
-		doc.reload()
-		self.assertEqual(s["result"], "PASS")
-		self.assertEqual(s["sheet"], "SEM 2")
-		self.assertEqual(doc.lines[0].new_rate, 99.0)
-
-	# 22. SELECCION: sheet_name inexistente -> FAIL
-	def test_invalid_sheet_selection_fails(self):
-		wb = build_multi_sheet_wb({"SEM 1": [(PLU_A, "A", 10.0)], "SEM 2": [(PLU_A, "A", 12.0)]})
-		doc = _make_import(wb, sheet_name="NO EXISTE")
-		s = service.run_preflight(doc.name)
-		self.assertEqual(s["result"], "FAIL")
-
-	# 23. PERIODO: una sola hoja pero SIN valid_from -> FAIL (exige confirmar periodo)
+	# 21. PERIODO: una sola hoja pero SIN valid_from -> FAIL (exige confirmar periodo)
 	def test_single_sheet_requires_period(self):
 		doc = _make_import(build_price_wb([(PLU_A, "A", 10.0)]), valid_from=None, valid_upto=None)
 		s = service.run_preflight(doc.name)
 		self.assertEqual(s["result"], "FAIL")
 
-	# 24. VIGENCIA: apply escribe valid_from/valid_upto en el Item Price
+	# 22. VIGENCIA: apply escribe valid_from/valid_upto en el Item Price
 	def test_apply_sets_validity_window(self):
 		doc, _ = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))
 		service.apply_prices(doc.name)
@@ -428,19 +410,95 @@ class TestPriceImport(FrappeTestCase):
 		self.assertEqual(str(ip.valid_upto), VALID_UPTO)
 		self.assertEqual(ip.price_list_rate, 10.0)
 
-	# 25. HISTORICO: dos ventanas distintas coexisten (no se sobrescribe)
-	def test_history_preserved_two_windows(self):
-		d1, _ = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))  # ventana ene 05-11
+	# 23. MODIFICADO: precio distinto -> nueva ventana + ventana anterior conservada (2 ventanas)
+	def test_changed_creates_new_window(self):
+		d1, _ = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))  # [01-05, 01-11]
 		service.apply_prices(d1.name)
 		d2 = _make_import(
 			build_price_wb([(PLU_A, "A", 15.0)]), valid_from="2026-01-12", valid_upto="2026-01-18"
 		)
 		service.run_preflight(d2.name)
 		d2.reload()
-		self.assertEqual(d2.lines[0].action, "new")
-		self.assertEqual(d2.lines[0].previous_rate, 10.0)  # compara contra la ventana anterior
+		self.assertEqual(d2.lines[0].action, "changed")
+		self.assertEqual(d2.lines[0].previous_rate, 10.0)
 		service.apply_prices(d2.name)
 		self.assertEqual(frappe.db.count("Item Price", {"item_code": ITEM_A, "price_list": PRICE_LIST}), 2)
+		# histórico conservado + ventana nueva
+		self.assertTrue(
+			frappe.db.exists(
+				"Item Price",
+				{
+					"item_code": ITEM_A,
+					"price_list": PRICE_LIST,
+					"valid_from": VALID_FROM,
+					"price_list_rate": 10.0,
+				},
+			)
+		)
+		self.assertTrue(
+			frappe.db.exists(
+				"Item Price",
+				{
+					"item_code": ITEM_A,
+					"price_list": PRICE_LIST,
+					"valid_from": "2026-01-12",
+					"price_list_rate": 15.0,
+				},
+			)
+		)
+
+	# 24. SIN CAMBIOS: misma tarifa en semana siguiente -> EXTIENDE, NO duplica
+	def test_unchanged_extends_not_duplicate(self):
+		d1, _ = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))  # [01-05, 01-11]
+		service.apply_prices(d1.name)
+		d2 = _make_import(
+			build_price_wb([(PLU_A, "A", 10.0)]), valid_from="2026-01-12", valid_upto="2026-01-18"
+		)
+		service.run_preflight(d2.name)
+		d2.reload()
+		self.assertEqual(d2.lines[0].action, "unchanged")
+		r = service.apply_prices(d2.name)
+		self.assertEqual(r["extended"], 1)
+		self.assertEqual(frappe.db.count("Item Price", {"item_code": ITEM_A, "price_list": PRICE_LIST}), 1)
+		ip = frappe.db.get_value(
+			"Item Price",
+			{"item_code": ITEM_A, "price_list": PRICE_LIST},
+			["valid_from", "valid_upto", "price_list_rate"],
+			as_dict=True,
+		)
+		self.assertEqual(str(ip.valid_from), VALID_FROM)  # misma ventana
+		self.assertEqual(str(ip.valid_upto), "2026-01-18")  # vigencia extendida
+		self.assertEqual(ip.price_list_rate, 10.0)
+
+	# 25. MODIFICADO sobre ventana ABIERTA -> cierra la anterior y conserva su precio histórico
+	def test_changed_closes_open_previous(self):
+		d1 = _make_import(build_price_wb([(PLU_A, "A", 10.0)]), valid_from="2026-01-05", valid_upto=None)
+		service.run_preflight(d1.name)
+		service.apply_prices(d1.name)
+		d2 = _make_import(
+			build_price_wb([(PLU_A, "A", 12.0)]), valid_from="2026-01-12", valid_upto="2026-01-18"
+		)
+		service.run_preflight(d2.name)
+		d2.reload()
+		self.assertEqual(d2.lines[0].action, "changed")
+		service.apply_prices(d2.name)
+		self.assertEqual(frappe.db.count("Item Price", {"item_code": ITEM_A, "price_list": PRICE_LIST}), 2)
+		old = frappe.db.get_value(
+			"Item Price",
+			{"item_code": ITEM_A, "price_list": PRICE_LIST, "valid_from": "2026-01-05"},
+			["valid_upto", "price_list_rate"],
+			as_dict=True,
+		)
+		self.assertEqual(str(old.valid_upto), "2026-01-11")  # cerrada justo antes de la nueva
+		self.assertEqual(old.price_list_rate, 10.0)  # precio histórico intacto
+		self.assertEqual(
+			frappe.db.get_value(
+				"Item Price",
+				{"item_code": ITEM_A, "price_list": PRICE_LIST, "valid_from": "2026-01-12"},
+				"price_list_rate",
+			),
+			12.0,
+		)
 
 	# 26. RETROACTIVA: ventana en el pasado no destruye la vigente
 	def test_retroactive_window(self):
