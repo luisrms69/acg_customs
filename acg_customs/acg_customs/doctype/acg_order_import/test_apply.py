@@ -30,6 +30,7 @@ from acg_customs.acg_customs.doctype.acg_order_import.test_preflight import (
 	_ensure_user,
 	_make_import,
 	build_workbook,
+	build_workbook_v2,
 )
 from acg_customs.acg_customs.order_import import apply, preflight
 from acg_customs.setup.install import PROVIDER_DIMENSION_FIELD, ensure_provider_dimension
@@ -312,3 +313,119 @@ class TestApply(FrappeTestCase):
 				apply.create_sales_orders(doc.name)
 		finally:
 			frappe.set_user("Administrator")
+
+	# ---- Candado de conciliacion de totales (Opcion B: posterior a la OV) ----
+	def _recon_by_branch(self, res):
+		return {d["branch"]: d for d in res["reconciliation"]["detail"]}
+
+	# CONCILIACION: total Excel == grand_total OV -> PASS
+	def test_recon_total_match_pass(self):
+		# B1: PLU_A x5 -> 50 ; B2: PLU_A x2 + PLU_B x3 -> 80
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}, {"code": BRANCH_2, "name": "B2"}],
+			[{"plu": PLU_A, "articulo": "A"}, {"plu": PLU_B, "articulo": "B"}],
+			{(0, 0): 5, (0, 1): 2, (1, 1): 3},
+			totals={0: 50.0, 1: 80.0},
+		)
+		doc = self._passed_import(wb)
+		res = apply.create_sales_orders(doc.name)
+		by = self._recon_by_branch(res)
+		self.assertEqual(by[BRANCH_1]["status"], "PASS")
+		self.assertEqual(by[BRANCH_2]["status"], "PASS")
+		self.assertEqual(res["reconciliation"]["pass"], 2)
+		self.assertEqual(by[BRANCH_1]["excel_total"], 50.0)
+		self.assertEqual(by[BRANCH_1]["erp_total"], 50.0)
+
+	# CONCILIACION: total Excel distinto (precio/cantidad) -> WARNING con diferencia
+	def test_recon_total_mismatch_warning(self):
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}, {"code": BRANCH_2, "name": "B2"}],
+			[{"plu": PLU_A, "articulo": "A"}, {"plu": PLU_B, "articulo": "B"}],
+			{(0, 0): 5, (0, 1): 2, (1, 1): 3},
+			totals={0: 50.0, 1: 999.00},  # B2 no coincide (OV=80)
+		)
+		doc = self._passed_import(wb)
+		res = apply.create_sales_orders(doc.name)
+		by = self._recon_by_branch(res)
+		self.assertEqual(by[BRANCH_1]["status"], "PASS")
+		self.assertEqual(by[BRANCH_2]["status"], "WARNING")
+		self.assertAlmostEqual(by[BRANCH_2]["diff"], 80.0 - 999.0, places=2)
+		# la OV con diferencia queda en BORRADOR
+		so = frappe.get_doc("Sales Order", by[BRANCH_2]["sales_order"])
+		self.assertEqual(so.docstatus, 0)
+
+	# CONCILIACION: total de referencia ausente -> SIN VALIDAR (no aprueba en silencio)
+	def test_recon_total_absent_sin_validar(self):
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}],
+			[{"plu": PLU_A, "articulo": "A"}],
+			{(0, 0): 5},
+		)  # sin fila de totales
+		doc = self._passed_import(wb)
+		res = apply.create_sales_orders(doc.name)
+		by = self._recon_by_branch(res)
+		self.assertEqual(by[BRANCH_1]["status"], "SIN VALIDAR")
+		self.assertIsNone(by[BRANCH_1]["excel_total"])
+		self.assertEqual(res["reconciliation"]["sin_validar"], 1)
+
+	# CONCILIACION: por sucursal independiente (PASS, WARNING y SIN VALIDAR juntos)
+	def test_recon_per_branch_independent(self):
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}, {"code": BRANCH_2, "name": "B2"}],
+			[{"plu": PLU_A, "articulo": "A"}, {"plu": PLU_B, "articulo": "B"}],
+			{(0, 0): 5, (0, 1): 2, (1, 1): 3},
+			totals={0: 50.0},  # solo B1 tiene total; B2 queda SIN VALIDAR
+		)
+		doc = self._passed_import(wb)
+		res = apply.create_sales_orders(doc.name)
+		by = self._recon_by_branch(res)
+		self.assertEqual(by[BRANCH_1]["status"], "PASS")
+		self.assertEqual(by[BRANCH_2]["status"], "SIN VALIDAR")
+
+	# CONTROL: las OV quedan en BORRADOR y no se pueden facturar (bloqueo nativo del flujo a FV)
+	def test_recon_ovs_stay_draft_block_fv(self):
+		from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
+
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}],
+			[{"plu": PLU_A, "articulo": "A"}],
+			{(0, 0): 5},
+			totals={0: 50.0},
+		)
+		doc = self._passed_import(wb)
+		res = apply.create_sales_orders(doc.name)
+		so = frappe.get_doc("Sales Order", res["created"][0])
+		self.assertEqual(so.docstatus, 0)  # borrador
+		# ERPNext nativo no permite facturar una OV en borrador
+		with self.assertRaises(frappe.ValidationError):
+			make_sales_invoice(so.name)
+
+	# CONCILIACION: formato Java (pedido_grid_v2), total ANTES de productos -> PASS
+	def test_recon_v2_format_java(self):
+		wb = build_workbook_v2(
+			[{"code": BRANCH_1, "name": "B1"}, {"code": BRANCH_2, "name": "B2"}],
+			[{"plu": PLU_A, "articulo": "A"}, {"plu": PLU_B, "articulo": "B"}],
+			{(0, 0): 5, (0, 1): 2, (1, 1): 3},
+			totals={0: 50.0, 1: 80.0},
+		)
+		doc = self._passed_import(wb)
+		res = apply.create_sales_orders(doc.name)
+		by = self._recon_by_branch(res)
+		self.assertEqual(by[BRANCH_1]["status"], "PASS")
+		self.assertEqual(by[BRANCH_2]["status"], "PASS")
+
+	# CONCILIACION: persistida en la fila hija (auditoria)
+	def test_recon_persisted_on_child(self):
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}],
+			[{"plu": PLU_A, "articulo": "A"}],
+			{(0, 0): 5},
+			totals={0: 50.0},
+		)
+		doc = self._passed_import(wb)
+		apply.create_sales_orders(doc.name)
+		doc.reload()
+		row = doc.sales_orders[0]
+		self.assertEqual(row.reconciliation_status, "PASS")
+		self.assertEqual(row.excel_total, 50.0)
+		self.assertEqual(row.erp_total, 50.0)

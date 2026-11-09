@@ -7,10 +7,9 @@
 
 ## Estado del proyecto
 
-- **App nueva:** creada en frappe-bench-v16 (esqueleto inicial)
 - **Bench activo:** `/home/erpnext/frappe-bench-v16`
 - **Branch protegida:** `version-16` (nunca commitear directamente — estándar Frappe)
-- **Versión:** 0.0.1 (desarrollo inicial)
+- **Versión:** canónica en `acg_customs/__init__.py` (`__version__`); v0.1.0 publicada
 - **En producción:** No
 
 ---
@@ -54,26 +53,11 @@ Personalizaciones para ERPNext/Frappe clientes CNAP
 
 ---
 
-## DocTypes principales
+## Documentación del app
 
-**Importador de pedidos**
-- `ACG Order Provider` — perfil de proveedor (Customer + Company por sitio). Base de la segregación.
-- `ACG Order Provider User` — asociación usuario→proveedor (única fuente para `get_user_provider`).
-- `ACG Order Import` — carga del Excel de pedido; preflight/apply; estados `Uploaded → Preflight Passed/Failed → Applied`. Campo `order_date` (fecha del pedido): fija la `transaction_date` de las OV y la fecha contra la que el preflight exige precio vigente.
-- `ACG Order Import Sales Order` (child) — auditoría/idempotencia de las OV creadas por import.
-- `ACG Order Branch Mapping` — `(customer, external_branch_code) → Address Shipping`, determinista y fail-closed.
-- **Preflight de OV — precio vigente por fecha:** cuando el Customer tiene `default_price_list`, el preflight exige que cada producto resuelto tenga un `Item Price` cuya vigencia cubra `order_date` (nulos = abiertos). Si ninguna ventana cubre la fecha → FAIL (NO se acepta el fallback nativo de ERPNext al precio más reciente).
-
-**Importador de precios**
-- `ACG Price Import` — carga semanal de costos; preflight fail-closed + apply transaccional de `Item Price`; permisos System Manager + Sales Master Manager.
-  - **Selección de semana (fail-closed):** si el libro trae varias hojas de precios, exige `sheet_name` explícito (nunca elige la primera); una sola hoja requiere confirmar el periodo. `detected_sheets` lista las hojas candidatas.
-  - **Vigencia nativa:** cada corrida escribe `Item Price.valid_from`/`valid_upto` (campos `valid_from`/`valid_upto` del doc). NO sobrescribe otras ventanas → conserva el histórico. Idempotente por ventana `(Item, Price List, valid_from)`. Soporta importaciones retroactivas y parciales; advierte solapamientos.
-  - **Variación anormal:** `variation_threshold_pct` (default 20%); una variación mayor genera advertencia y marca la línea (`abnormal`), sin bloquear.
-- `ACG Price Import Line` (child) — comparativo por código: `action ∈ {new, changed, unchanged, unresolved, skipped}`, más `previous_rate`/`new_rate`/`variation_pct`/`abnormal`/`valid_from`/`valid_upto`.
-- `ACG External Code Exclusion` — códigos fuera de catálogo por `(customer, external_code)`; alimenta `skipped` en el preflight de precios.
-
-**Dimensión contable**
-- Accounting Dimension nativa `ACG Order Provider` → campo `acg_order_provider` en Sales Order / Sales Invoice (asegurada en `after_migrate`).
+La documentación funcional y técnica (DocTypes, flujos, arquitectura, ADR, referencia)
+vive en **`docs/`** (MkDocs), no en este archivo. Ver `docs/index.md`. Este `CLAUDE.md`
+contiene únicamente **instrucciones de operación de Claude y baseline del proyecto**.
 
 ---
 
@@ -115,6 +99,7 @@ bench --site test-acg_customs.localhost run-tests --app acg_customs
 ### Antes de cada PR
 
 - [ ] Linters pasados
+- [ ] `/doc-review` pasado (gate documental; `mkdocs build --strict` en verde)
 - [ ] Fixtures exportados si hubo cambios de Custom Fields, Roles, Workspaces
 - [ ] Patch creado si hay cambios de esquema — **requiere autorización explícita**
 - [ ] `bench --site <dev-site> migrate` limpio

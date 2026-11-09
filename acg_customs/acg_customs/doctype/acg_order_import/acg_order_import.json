@@ -8,6 +8,7 @@
  "field_order": [
   "provider",
   "order_date",
+  "total_tolerance",
   "status",
   "source_section",
   "excel_file",
@@ -42,6 +43,13 @@
    "fieldtype": "Date",
    "label": "Fecha del pedido",
    "description": "Fecha del pedido. Determina la transaction_date de las OV y la vigencia de precio exigida en el preflight."
+  },
+  {
+   "default": "0.01",
+   "fieldname": "total_tolerance",
+   "fieldtype": "Currency",
+   "label": "Tolerancia de conciliacion",
+   "description": "Diferencia absoluta maxima (Excel vs OV) para considerar PASS. Default 0.01."
   },
   {
    "default": "Uploaded",

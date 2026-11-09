@@ -33,9 +33,10 @@ BRANCH_DIRTY = "376"  # en el Excel aparece como "376 ." -> se normaliza a "376"
 # --------------------------------------------------------------------------
 # Construccion de workbook sintetico con la firma estructural del perfil
 # --------------------------------------------------------------------------
-def build_workbook(branches, products, quantities, *, sheet="PEDIDO COMERCIAL", header=None):
+def build_workbook(branches, products, quantities, *, sheet="PEDIDO COMERCIAL", header=None, totals=None):
 	"""branches: list[{code,name}] desde col O. products: list[{plu,articulo}] desde fila 7.
-	quantities: dict[(prod_idx, branch_idx)] = valor."""
+	quantities: dict[(prod_idx, branch_idx)] = valor.
+	totals: dict[branch_idx] = importe de referencia -> fila de totales DESPUES del ultimo producto."""
 	wb = openpyxl.Workbook()
 	ws = wb.active
 	ws.title = sheet
@@ -56,6 +57,10 @@ def build_workbook(branches, products, quantities, *, sheet="PEDIDO COMERCIAL", 
 		ws.cell(row=r, column=14, value=p["articulo"])
 	for (pi, bi), val in quantities.items():
 		ws.cell(row=hr + 1 + pi, column=15 + bi, value=val)
+	if totals:
+		total_row = hr + 1 + len(products)  # fila inmediatamente despues del ultimo producto
+		for bi, amt in totals.items():
+			ws.cell(row=total_row, column=15 + bi, value=amt)
 	bio = io.BytesIO()
 	wb.save(bio)
 	return bio.getvalue()
@@ -69,7 +74,7 @@ def valid_workbook():
 	)
 
 
-def build_workbook_v2(branches, products, quantities, *, trailing=None):
+def build_workbook_v2(branches, products, quantities, *, trailing=None, totals=None):
 	"""Layout del perfil pedido_grid_v2: hoja 'PEDIDO', encabezado fila 3 (D='TIENDAS',
 	E='CLAVE'), clave de sucursal en fila 2, nombre en fila 3, sucursales desde col G(7),
 	productos desde fila 7 (E=clave, F=articulo). `trailing` = columnas pegadas DESPUES del
@@ -94,6 +99,9 @@ def build_workbook_v2(branches, products, quantities, *, trailing=None):
 		ws.cell(row=r, column=6, value=p["articulo"])
 	for (pi, bi), val in quantities.items():
 		ws.cell(row=pr0 + pi, column=7 + bi, value=val)
+	if totals:
+		for bi, amt in totals.items():  # fila de totales ANTES del primer producto (pr0-1)
+			ws.cell(row=pr0 - 1, column=7 + bi, value=amt)
 	if trailing:
 		base = 7 + len(branches)
 		for j, (code, name, qmap) in enumerate(trailing):

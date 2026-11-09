@@ -1,0 +1,44 @@
+# ADR-0001: Vigencia nativa de precios vía `Item Price.valid_from`/`valid_upto`
+
+**Fecha:** 2026-11-06
+**Status:** Activo
+
+## Contexto
+
+El importador semanal de precios aplicaba un **único** `Item Price` por `(Item, Price
+List)`, sobrescribiéndolo en cada corrida. Esto impedía conservar el histórico por
+fechas y provocó un defecto real: con un libro de varias semanas, el parser tomaba la
+primera hoja (enero) y aplicaba precios de un periodo equivocado a pedidos de octubre,
+detectable solo auditando contra los CFDI reales.
+
+Además, la Orden de Venta se creaba sin fecha de referencia, y ERPNext, al no encontrar
+una ventana de vigencia que cubriera la fecha, **cae al precio más reciente** (fallback),
+lo que podía aplicar silenciosamente un precio de otra semana.
+
+## Decisión
+
+1. **Usar la vigencia nativa de ERPNext**: cada corrida de precios escribe
+   `Item Price.valid_from`/`valid_upto`. No se sobrescriben otras ventanas → el histórico
+   se conserva. La selección del precio por fecha la hace ERPNext (`get_price_list_rate`).
+2. **Selección de semana *fail-closed***: si el libro trae varias hojas de precios, se
+   exige `sheet_name` explícito; el parser nunca elige la primera. El parser permanece
+   como extracción pura.
+3. **Fecha del pedido**: `ACG Order Import.order_date` fija la `transaction_date` de las
+   OV, y el preflight exige que cada producto resuelto tenga un `Item Price` cuya vigencia
+   cubra esa fecha. **Se rechaza el fallback nativo**: sin cobertura temporal → FAIL.
+
+## Consecuencias
+
+- Histórico de precios por fechas disponible y auditable; idempotencia por ventana
+  `(Item, Price List, valid_from)`.
+- Importaciones retroactivas y parciales soportadas; los solapamientos se **advierten**
+  (no se auto-cierran ventanas, para no destruir información).
+- Un pedido cuya semana de precios no se importó **se bloquea** en el preflight, en vez de
+  facturarse con un precio incorrecto.
+- Deuda conocida: no hay auto-cierre de la ventana anterior al solaparse; se resuelve por
+  `valid_from desc` nativo y se reporta como advertencia.
+
+## Alternativa descartada
+
+Mantener un único `Item Price` sobrescrito y confiar en el fallback nativo. Descartada:
+pierde el histórico y aplica precios de la semana equivocada sin aviso.

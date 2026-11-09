@@ -31,6 +31,7 @@ class ProfileSpec:
 		name_row_offset,
 		product_resolution_key,
 		stop_at_total_column=False,
+		total_row_position=None,
 	):
 		self.key = key
 		self.source_sheet = source_sheet
@@ -42,6 +43,12 @@ class ProfileSpec:
 		self.name_row_offset = name_row_offset
 		self.product_resolution_key = product_resolution_key
 		self.stop_at_total_column = stop_at_total_column
+		# Donde esta la fila de TOTAL monetario por sucursal (alineada con la columna
+		# de cada sucursal). Solo indica DONDE leer el dato; el parser no calcula nada.
+		#   "after_products"  -> fila inmediatamente despues del ultimo producto.
+		#   "before_products" -> fila inmediatamente antes del primer producto.
+		#   None              -> el formato no expone un total de referencia.
+		self.total_row_position = total_row_position
 
 
 PROFILES = [
@@ -56,6 +63,7 @@ PROFILES = [
 		name_row_offset=0,
 		product_resolution_key="plu_cit",
 		stop_at_total_column=False,
+		total_row_position="after_products",  # total por sucursal debajo del ultimo producto
 	),
 	ProfileSpec(
 		key="pedido_grid_v2",
@@ -68,6 +76,7 @@ PROFILES = [
 		name_row_offset=0,
 		product_resolution_key="clave",
 		stop_at_total_column=True,
+		total_row_position="before_products",  # total por sucursal arriba del primer producto
 	),
 ]
 

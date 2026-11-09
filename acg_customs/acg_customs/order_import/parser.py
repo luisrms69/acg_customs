@@ -75,11 +75,41 @@ def _as_quantity(value):
 		return ("invalid", s)
 
 
+def _extract_branch_totals(ws, spec, products, branches):
+	"""EXTRAE (no calcula) el total monetario de referencia por sucursal.
+
+	El total vive en una fila alineada con la columna de cada sucursal, cuya posicion
+	la define el perfil (total_row_position). El parser solo LEE el numero de esa celda;
+	no suma, no aplica precios ni impuestos. Devuelve {code: {amount, cell, reliable}}.
+	"""
+	totals = {}
+	if not getattr(spec, "total_row_position", None) or not products:
+		return totals
+	first_row = products[0]["row"]
+	last_row = products[-1]["row"]
+	if spec.total_row_position == "after_products":
+		total_row = last_row + 1
+	elif spec.total_row_position == "before_products":
+		total_row = first_row - 1
+	else:
+		return totals
+	if total_row < 1:
+		return totals
+	for b in branches:
+		v = ws.cell(row=total_row, column=b["col"]).value
+		cell = f"r{total_row}c{b['col']}"
+		if isinstance(v, (int, float)) and not isinstance(v, bool):
+			totals[b["code"]] = {"amount": float(v), "cell": cell, "reliable": True}
+		else:
+			totals[b["code"]] = {"amount": None, "cell": cell, "reliable": False}
+	return totals
+
+
 def parse_workbook(wb, spec):
 	"""Parsea el workbook segun el ProfileSpec detectado.
 
 	Devuelve dict con: header_row, branches, products, lines, structural_errors,
-	warnings, total_units.
+	warnings, total_units, branch_totals.
 	"""
 	ws = wb[spec.source_sheet]
 	header_row = profiles.find_header_row(ws, spec)
@@ -191,6 +221,8 @@ def parse_workbook(wb, spec):
 			f"reporta como error aparte y no se asigna a ninguna sucursal. Revisar si falta la clave."
 		)
 
+	branch_totals = _extract_branch_totals(ws, spec, products, branches)
+
 	return {
 		"header_row": header_row,
 		"branches": branches,
@@ -200,4 +232,5 @@ def parse_workbook(wb, spec):
 		"warnings": warnings,
 		"total_units": total_units,
 		"branch_by_col": branch_by_col,
+		"branch_totals": branch_totals,
 	}

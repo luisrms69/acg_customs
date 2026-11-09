@@ -96,6 +96,7 @@ def create_sales_orders(order_import: str) -> dict:
 			"idempotent": True,
 			"created": [],
 			"existing": [r.sales_order for r in doc.sales_orders],
+			"reconciliation": None,
 		}
 	if doc.status != "Preflight Passed":
 		frappe.throw(
@@ -154,6 +155,7 @@ def create_sales_orders(order_import: str) -> dict:
 	try:
 		created = []
 		missing_price = []
+		created_rows = {}  # code -> (child_row, sales_order_doc)
 		for code in sorted(plan):
 			if code in existing_codes:
 				continue
@@ -170,10 +172,11 @@ def create_sales_orders(order_import: str) -> dict:
 			for it in so.items:
 				if not it.rate:
 					missing_price.append(f"{code}:{it.item_code}")
-			doc.append(
+			row = doc.append(
 				"sales_orders",
 				{"sales_order": so.name, "external_branch_code": code, "address": plan[code]["address"]},
 			)
+			created_rows[code] = (row, so)
 			created.append(so.name)
 		if missing_price:
 			frappe.throw(
@@ -183,6 +186,8 @@ def create_sales_orders(order_import: str) -> dict:
 				).format(len(missing_price), ", ".join(missing_price[:20])),
 				frappe.ValidationError,
 			)
+		# Conciliacion POSTERIOR (las OV quedan en borrador): total Excel vs grand_total nativo.
+		reconciliation = _reconcile(doc, parsed.get("branch_totals", {}), created_rows)
 		doc.status = "Applied"
 		doc.save(ignore_permissions=True)
 	except Exception:
@@ -194,4 +199,40 @@ def create_sales_orders(order_import: str) -> dict:
 		"idempotent": False,
 		"created": created,
 		"existing": sorted(existing_codes),
+		"reconciliation": reconciliation,
 	}
+
+
+def _reconcile(doc, branch_totals, created_rows):
+	"""Compara, por sucursal, el total de referencia del Excel contra Sales Order.grand_total
+	(ya calculado por el flujo nativo). Las OV permanecen en borrador. Solo registra el
+	resultado por fila (auditoria) y devuelve el resumen; no reabre ni somete nada."""
+	tol = frappe.utils.flt(doc.total_tolerance) or 0.01
+	summary = {"tolerance": tol, "pass": 0, "warning": 0, "sin_validar": 0, "detail": []}
+	for code, (row, so) in sorted(created_rows.items()):
+		erp = frappe.utils.flt(so.grand_total)
+		row.erp_total = erp
+		bt = branch_totals.get(code)
+		if not bt or not bt.get("reliable") or bt.get("amount") is None:
+			row.reconciliation_status = "SIN VALIDAR"
+			row.excel_total = None
+			row.reconciliation_diff = None
+			summary["sin_validar"] += 1
+		else:
+			excel = frappe.utils.flt(bt["amount"])
+			diff = erp - excel
+			row.excel_total = excel
+			row.reconciliation_diff = diff
+			row.reconciliation_status = "PASS" if abs(diff) <= tol else "WARNING"
+			summary["pass" if abs(diff) <= tol else "warning"] += 1
+		summary["detail"].append(
+			{
+				"branch": code,
+				"sales_order": so.name,
+				"excel_total": row.excel_total,
+				"erp_total": erp,
+				"diff": row.reconciliation_diff,
+				"status": row.reconciliation_status,
+			}
+		)
+	return summary

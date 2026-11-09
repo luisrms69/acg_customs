@@ -1,5 +1,40 @@
 # Changelog — acg_customs
 
+## [0.2.0] — 2026-11-08
+
+### Added
+- Importador de precios multi-bloque: el parser lee **todos** los bloques de columnas
+  `CODIGO | DESCRIPCION | COSTO` de la hoja (antes solo el primero, dejando sin
+  actualizar ~la mitad del catálogo).
+- Selección de semana *fail-closed* en `ACG Price Import`: si el libro trae varias hojas
+  de precios se exige `sheet_name` explícito (nunca se elige la primera); una sola hoja
+  exige confirmar el periodo. Campo `detected_sheets` con las hojas candidatas.
+- Vigencia nativa de precios: `valid_from`/`valid_upto` en `ACG Price Import` → se
+  escriben en `Item Price`. No sobrescribe otras ventanas (conserva histórico);
+  idempotente por `(Item, Price List, valid_from)`; soporta retroactivas y parciales;
+  advierte solapamientos. Ver ADR-0001.
+- Detección de variación anormal: `variation_threshold_pct` (default 20%) → advertencia y
+  flag `abnormal` por línea. Comparativo enriquecido (`variation_pct`, `valid_from`,
+  `valid_upto` en `ACG Price Import Line`).
+- `ACG Order Import.order_date` (fecha del pedido) → `transaction_date` de las OV.
+- Preflight de OV con **precio vigente por fecha**: exige `Item Price` cuya vigencia cubra
+  `order_date`; sin cobertura → FAIL, **sin aceptar el fallback nativo** de ERPNext.
+- Conciliación de totales de OV (Opción B): las OV se crean en borrador y se comparan, por
+  sucursal, contra el total del Excel (`total_tolerance` default $0.01) →
+  `PASS`/`WARNING`/`SIN VALIDAR`. Extracción del total por `profile`
+  (`total_row_position`: `comercial_grid_v1` after-products, `pedido_grid_v2`
+  before-products). Campos de conciliación en `ACG Order Import Sales Order`. Ver ADR-0002.
+- Documentación MkDocs del app (usuario, arquitectura, referencia, ADR) alineada al
+  estándar de `frappe-infrastructure`.
+
+### Changed
+- `price_import/parser.py`: extracción multi-hoja/multi-bloque como función pura.
+- `price_import/service.py`: comparativo por ventana de vigencia + variación + solapes.
+- `order_import/apply.py`: `transaction_date = order_date`; conciliación posterior; OV en
+  borrador.
+- `CLAUDE.md`: se retira la documentación del app (DocTypes) — ahora vive en `docs/`;
+  CLAUDE.md queda con instrucciones y baseline.
+
 ## [0.1.0] — 2026-10-30
 
 ### Added

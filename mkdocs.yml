@@ -1,0 +1,36 @@
+site_name: "acg_customs"
+site_description: "Personalizaciones ERPNext/Frappe para clientes CNAP: importación de precios, vigencias e importación de pedidos con conciliación de OV."
+site_author: "Consultoria en Negocios y Aplicaciones"
+docs_dir: docs
+
+theme:
+  name: material
+  language: es
+  features:
+    - navigation.sections
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+
+nav:
+  - Inicio: index.md
+  - Manual de usuario:
+      - Índice: usuario/index.md
+      - Importador de precios: usuario/importador-precios.md
+      - Importador de pedidos: usuario/importador-pedidos.md
+      - Conciliación de totales de OV: usuario/conciliacion-ov.md
+  - Técnico:
+      - Arquitectura: tecnico/arquitectura.md
+  - Referencia:
+      - DocTypes y campos: referencia/doctypes.md
+  - Decisiones (ADR):
+      - Índice: adr/index.md
+      - ADR-0000 — Estado inicial: adr/0000-estado-inicial-app.md
+      - ADR-0001 — Vigencia nativa de precios: adr/0001-vigencia-nativa-item-price.md
+      - ADR-0002 — Conciliación de OV (Opción B): adr/0002-conciliacion-ov-opcion-b.md
+  - Changelog: CHANGELOG.md

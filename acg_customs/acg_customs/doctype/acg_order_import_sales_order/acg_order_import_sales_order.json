@@ -8,6 +8,10 @@
   "external_branch_code",
   "address",
   "sales_order",
+  "reconciliation_status",
+  "excel_total",
+  "erp_total",
+  "reconciliation_diff",
   "remarks"
  ],
  "fields": [
@@ -32,6 +36,32 @@
    "label": "Sales Order",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "reconciliation_status",
+   "fieldtype": "Select",
+   "options": "\nPASS\nWARNING\nSIN VALIDAR",
+   "label": "Conciliacion",
+   "in_list_view": 1,
+   "description": "PASS: total Excel == OV (<= tolerancia). WARNING: difieren. SIN VALIDAR: sin total de referencia."
+  },
+  {
+   "fieldname": "excel_total",
+   "fieldtype": "Currency",
+   "label": "Total Excel (ref)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "erp_total",
+   "fieldtype": "Currency",
+   "label": "Total OV (ERPNext)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reconciliation_diff",
+   "fieldtype": "Currency",
+   "label": "Diferencia",
+   "read_only": 1
   },
   {
    "fieldname": "remarks",
