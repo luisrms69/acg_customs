@@ -11,7 +11,6 @@ Idempotente: no modifica el archivo original y re-ejecutar produce el mismo resu
 
 import hashlib
 import io
-from collections import Counter
 
 import frappe
 from frappe import _
@@ -124,17 +123,22 @@ def execute_preflight(doc) -> dict:
 	parsed = parser.parse_workbook(wb, spec)
 	summary["header_row"] = parsed["header_row"]
 	# Columnas de sucursal en el archivo (catalogo del proveedor): son sucursales reales,
-	# pero incluyen las que NO pidieron esta vez y posibles columnas con clave repetida.
-	# NO es "el pedido". El pedido son las sucursales con cantidad > 0 (branches_with_orders).
-	col_codes = [b["code"] for b in parsed["branches"]]
-	summary["branch_columns_in_file"] = len(col_codes)
-	dups = sorted({c for c, n in Counter(col_codes).items() if n > 1})
-	summary["branches_duplicated"] = dups
-	if dups:
+	# pero incluyen las que NO pidieron esta vez. NO es "el pedido".
+	summary["branch_columns_in_file"] = len(parsed["branches"])
+	# Una clave puede aparecer en VARIAS columnas del catalogo (p. ej. una columna de respaldo
+	# vacia). Eso NO implica suma: solo se advierte si la clave trae pedido en MAS DE UNA columna
+	# (ahi SI se suman cantidades y hay que verificar que sea la misma sucursal).
+	cols_per_code = {}
+	for ln in parsed["lines"]:
+		cols_per_code.setdefault(ln["branch_code"], set()).add(ln["col"])
+	summed = sorted(c for c, cols in cols_per_code.items() if len(cols) > 1)
+	summary["branches_duplicated"] = summed
+	if summed:
 		summary["warnings"].append(
-			_("Sucursal(es) con clave repetida en varias columnas (sus pedidos se suman): {0}.").format(
-				", ".join(dups)
-			)
+			_(
+				"Sucursal(es) cuyo pedido proviene de MAS de una columna; sus cantidades se suman: "
+				"{0}. Verifique que esas columnas correspondan a la misma sucursal."
+			).format(", ".join(summed))
 		)
 	summary["product_lines"] = len(parsed["lines"])
 	summary["total_units"] = parsed["total_units"]

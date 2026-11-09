@@ -37,8 +37,10 @@ DocType: **ACG Order Import**. Carga el Excel del pedido del proveedor y genera 
 
 El resumen del preflight distingue **«Sucursales con pedido»** (las reales de esta corrida,
 clave única con cantidad > 0) de **«Columnas de sucursal en el archivo»** (el catálogo completo
-del proveedor; no es el pedido). Si una misma clave de sucursal aparece en **varias columnas**,
-se **advierte** (sus pedidos se suman).
+del proveedor; no es el pedido). Una misma clave puede aparecer en varias columnas del catálogo
+(p. ej. una columna de respaldo vacía); **eso no genera aviso**. Solo se **advierte** cuando una
+clave trae pedido en **más de una columna** (ahí sí se **suman** cantidades y conviene verificar
+que correspondan a la misma sucursal).
 
 ## Creación de las OV
 

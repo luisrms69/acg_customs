@@ -10,7 +10,9 @@ frappe.ui.form.on("ACG Order Import", {
 		const status = frm.doc.status;
 
 		if (["Uploaded", "Preflight Failed", "Preflight Passed"].includes(status)) {
-			frm.add_custom_button(__("Ejecutar Preflight"), () => {
+			frm.add_custom_button(__("Ejecutar Preflight"), async () => {
+				// Guardar primero para que el preflight use la Fecha del pedido visible en el formulario.
+				if (frm.is_dirty()) await frm.save();
 				frappe.call({
 					method: "acg_customs.acg_customs.order_import.preflight.run_preflight",
 					args: { order_import: frm.doc.name },
@@ -122,15 +124,28 @@ function acg_render_preflight(frm) {
 		.map((e) => `<li>${frappe.utils.escape_html(e)}</li>`)
 		.join("");
 
+	const verdict = pass
+		? __("Sin errores que bloqueen — puede crear las Órdenes de Venta.")
+		: __(
+				"Hay errores que BLOQUEAN la creación de OV. Corrija y vuelva a ejecutar el preflight."
+		  );
+
 	$w.html(`
-		<div style="margin-bottom:8px">${__("Resultado")}: ${badge}</div>
+		<div style="margin-bottom:8px">${__("Resultado")}: ${badge}
+			&nbsp;<span style="color:#6c7680">${verdict}</span></div>
 		<table style="font-size:12px">${tr}</table>
-		${warn ? `<div style="margin-top:8px"><b>${__("Advertencias")}</b><ul>${warn}</ul></div>` : ""}
 		${
 			errs
 				? `<div style="margin-top:8px;color:#b00"><b>${__(
-						"Errores"
+						"Errores (bloquean)"
 				  )}</b><ul>${errs}</ul></div>`
+				: ""
+		}
+		${
+			warn
+				? `<div style="margin-top:8px;color:#8a6d00"><b>${__(
+						"Advertencias (no bloquean)"
+				  )}</b><ul>${warn}</ul></div>`
 				: ""
 		}
 	`);

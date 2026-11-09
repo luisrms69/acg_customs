@@ -20,6 +20,7 @@
   "uploaded_on",
   "preflight_section",
   "preflight_report_html",
+  "tech_section",
   "preflight_summary",
   "errors",
   "so_section",
@@ -124,6 +125,13 @@
    "fieldname": "preflight_report_html",
    "fieldtype": "HTML",
    "label": "Resultado preflight"
+  },
+  {
+   "fieldname": "tech_section",
+   "fieldtype": "Section Break",
+   "label": "Detalle técnico (opcional)",
+   "collapsible": 1,
+   "collapsed": 1
   },
   {
    "fieldname": "preflight_summary",

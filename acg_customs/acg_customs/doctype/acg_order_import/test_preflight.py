@@ -538,9 +538,8 @@ class TestPreflight(FrappeTestCase):
 		self.assertEqual(s["result"], "FAIL")
 		self.assertTrue(any("customer" in e.lower() for e in s["structural_errors"]))
 
-	# CONTEO: columnas de sucursal en el archivo != sucursales del pedido; clave repetida -> aviso
-	def test_branch_counting_and_duplicates(self):
-		# dos columnas con la MISMA clave de sucursal + una tercera sucursal sin pedido
+	# CONTEO: columnas de sucursal en el archivo != sucursales del pedido
+	def test_branch_counting(self):
 		wb = build_workbook(
 			[
 				{"code": BRANCH_1, "name": "B1"},
@@ -548,10 +547,30 @@ class TestPreflight(FrappeTestCase):
 				{"code": BRANCH_2, "name": "B2 sin pedido"},
 			],
 			[{"plu": PLU_A, "articulo": "A"}],
-			{(0, 0): 3, (0, 1): 2},  # solo las dos columnas de B1 traen pedido
+			{(0, 0): 3},  # pedido SOLO en la primera columna de B1
 		)
 		_, s = self._run(wb)
-		self.assertEqual(s["branch_columns_in_file"], 3)  # 3 columnas de sucursal
-		self.assertEqual(s["branches_with_orders"], 1)  # 1 sucursal REAL con pedido (clave unica)
+		self.assertEqual(s["branch_columns_in_file"], 3)  # 3 columnas de sucursal en el archivo
+		self.assertEqual(s["branches_with_orders"], 1)  # 1 sucursal REAL con pedido
+
+	# DUPLICADO sin suma real (caso 376/435): clave en 2 columnas pero SOLO una pide -> NO se advierte
+	def test_duplicate_column_without_orders_not_warned(self):
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}, {"code": BRANCH_1, "name": "B1 respaldo"}],
+			[{"plu": PLU_A, "articulo": "A"}],
+			{(0, 0): 5},  # solo la primera columna trae pedido; la de respaldo esta vacia
+		)
+		_, s = self._run(wb)
+		self.assertEqual(s["branches_duplicated"], [])  # no hay suma -> no es duplicado operativo
+		self.assertFalse(any("columna" in w.lower() for w in s["warnings"]))
+
+	# DUPLICADO con suma real: la MISMA clave pide en 2 columnas -> se suma y SE advierte
+	def test_duplicate_columns_with_orders_warned(self):
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}, {"code": BRANCH_1, "name": "B1 col2"}],
+			[{"plu": PLU_A, "articulo": "A"}],
+			{(0, 0): 3, (0, 1): 2},  # pedido en AMBAS columnas de la misma clave
+		)
+		_, s = self._run(wb)
 		self.assertEqual(s["branches_duplicated"], [BRANCH_1])
-		self.assertTrue(any("repetida" in w.lower() for w in s["warnings"]))
+		self.assertTrue(any("columna" in w.lower() for w in s["warnings"]))

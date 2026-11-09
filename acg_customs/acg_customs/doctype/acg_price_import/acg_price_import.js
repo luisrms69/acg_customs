@@ -33,7 +33,9 @@ frappe.ui.form.on("ACG Price Import", {
 		const status = frm.doc.status;
 
 		if (["Uploaded", "Preflight Failed", "Preflight Passed"].includes(status)) {
-			frm.add_custom_button(__("Ejecutar Preflight"), () => {
+			frm.add_custom_button(__("Ejecutar Preflight"), async () => {
+				// Guardar primero para que el preflight use la vigencia/datos visibles en el formulario.
+				if (frm.is_dirty()) await frm.save();
 				frappe.call({
 					method: "acg_customs.acg_customs.price_import.service.run_preflight",
 					args: { price_import: frm.doc.name },
