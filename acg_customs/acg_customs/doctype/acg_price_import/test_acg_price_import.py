@@ -383,12 +383,35 @@ class TestPriceImport(FrappeTestCase):
 		self.assertEqual(by_item.get(ITEM_A), 11.0)
 		self.assertEqual(by_item.get(ITEM_B), 22.0)
 
-	# 20. ARCHIVO: libro multi-hoja -> FAIL (archivo incorrecto, sin seleccion)
-	def test_multi_sheet_rejected(self):
+	# 20. ARCHIVO: libro multi-hoja -> rechazado al GUARDAR (server-side, anti-bypass API)
+	def test_multi_sheet_rejected_on_save(self):
 		wb = build_multi_sheet_wb({"SEM 1": [(PLU_A, "A", 10.0)], "SEM 2": [(PLU_A, "A", 12.0)]})
-		_, s = self._pf(wb)
-		self.assertEqual(s["result"], "FAIL")
-		self.assertTrue(any("incorrecto" in e.lower() for e in s["errors"]))
+		with self.assertRaises(frappe.ValidationError):
+			_make_import(wb)  # validate() lo rechaza antes de guardar
+
+	# 20b. sheet_info cuenta las hojas (lo invoca la GUI al ADJUNTAR, antes de guardar)
+	def test_sheet_info_counts_sheets(self):
+		frappe.set_user("Administrator")
+		fm = frappe.get_doc(
+			{
+				"doctype": "File",
+				"file_name": "multi.xlsx",
+				"is_private": 1,
+				"content": build_multi_sheet_wb(
+					{"SEM 1": [(PLU_A, "A", 10.0)], "SEM 2": [(PLU_A, "A", 12.0)]}
+				),
+			}
+		).insert(ignore_permissions=True)
+		self.assertEqual(service.sheet_info(fm.file_url)["sheets"], 2)
+		fu = frappe.get_doc(
+			{
+				"doctype": "File",
+				"file_name": "uno.xlsx",
+				"is_private": 1,
+				"content": build_price_wb([(PLU_A, "A", 10.0)]),
+			}
+		).insert(ignore_permissions=True)
+		self.assertEqual(service.sheet_info(fu.file_url)["sheets"], 1)
 
 	# 21. PERIODO: una sola hoja pero SIN valid_from -> FAIL (exige confirmar periodo)
 	def test_single_sheet_requires_period(self):

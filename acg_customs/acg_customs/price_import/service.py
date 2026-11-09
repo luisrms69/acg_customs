@@ -289,6 +289,26 @@ def _persist(doc, summary, lines, status):
 
 
 @frappe.whitelist()
+def sheet_info(file_url: str) -> dict:
+	"""Cuenta las hojas de precios de un archivo adjunto. La GUI lo llama al ADJUNTAR
+	para rechazar de inmediato los libros con mas de una hoja (sin esperar a guardar)."""
+	if not frappe.has_permission("ACG Price Import", "create"):
+		frappe.throw(_("Sin permiso."), frappe.PermissionError)
+	name = frappe.db.get_value("File", {"file_url": file_url})
+	if not name:
+		return {"sheets": 0, "names": []}
+	content = frappe.get_doc("File", name).get_content()
+	if isinstance(content, str):
+		content = content.encode("utf-8")
+	try:
+		wb = __import__("openpyxl").load_workbook(io.BytesIO(content), data_only=True)
+	except Exception:
+		return {"sheets": 0, "names": []}
+	names = parser.list_price_sheets(wb)
+	return {"sheets": len(names), "names": names}
+
+
+@frappe.whitelist()
 def run_preflight(price_import: str) -> dict:
 	doc = frappe.get_doc("ACG Price Import", price_import)
 	doc.check_permission("write")

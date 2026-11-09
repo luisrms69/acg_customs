@@ -2,6 +2,30 @@
 // For license information, please see license.txt
 
 frappe.ui.form.on("ACG Price Import", {
+	excel_file(frm) {
+		// Validacion INMEDIATA al adjuntar: un libro con mas de una hoja de precios se
+		// rechaza en ese momento (sin esperar a guardar / preflight) y se quita del formulario.
+		if (!frm.doc.excel_file) return;
+		frappe.call({
+			method: "acg_customs.acg_customs.price_import.service.sheet_info",
+			args: { file_url: frm.doc.excel_file },
+			callback: (r) => {
+				const info = r.message || {};
+				if ((info.sheets || 0) > 1) {
+					frappe.msgprint({
+						title: __("Archivo incorrecto"),
+						message: __(
+							"Archivo incorrecto: el Excel debe contener una sola hoja ({0} hojas detectadas).",
+							[info.sheets]
+						),
+						indicator: "red",
+					});
+					frm.set_value("excel_file", null);
+				}
+			},
+		});
+	},
+
 	refresh(frm) {
 		acg_render_price_preflight(frm);
 		if (frm.is_new()) return;

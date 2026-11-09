@@ -17,9 +17,12 @@ DocType: **ACG Price Import**. Carga el Excel semanal de costos y actualiza los
 
 El archivo de precios debe traer **una sola hoja de precios** (la semana a importar).
 
-- **Más de una hoja de precios → ARCHIVO INCORRECTO:** el preflight **falla** e indica
-  cuántas hojas trae. **No se selecciona** ni se elige automáticamente ninguna: debes subir
-  el archivo de la semana correspondiente. (Esto evita aplicar precios de otra semana.)
+- **Más de una hoja de precios → ARCHIVO INCORRECTO:** se rechaza **en cuanto adjuntas el
+  archivo** (sin esperar a guardar ni al preflight): aparece *«Archivo incorrecto: el Excel
+  debe contener una sola hoja»* y el archivo inválido **se quita** del formulario. La misma
+  validación corre en el servidor (al guardar y por API), de modo que no puede eludirse.
+  **No se selecciona** ni se elige automáticamente ninguna hoja: sube el archivo de la semana
+  correspondiente. (Esto evita aplicar precios de otra semana.)
 - **Una sola hoja:** se usa esa, pero igual debes **confirmar el periodo de vigencia**
   (`Vigente desde` / `Vigente hasta`) antes de aplicar.
 
