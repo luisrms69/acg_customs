@@ -55,9 +55,11 @@ def _build_plan(parsed, customer):
 PROVIDER_DIMENSION_FIELD = "acg_order_provider"  # Accounting Dimension nativa (proveedor)
 
 
-def _create_sales_order(customer, company, address, items, provider, price_list, order_date=None):
-	# La fecha del pedido determina transaction_date -> seleccion de precio vigente nativa por fecha.
-	today = order_date or frappe.utils.nowdate()
+def _create_sales_order(customer, company, address, items, provider, price_list, order_date):
+	# La fecha del pedido (obligatoria) determina transaction_date -> precio vigente por fecha.
+	if not order_date:
+		frappe.throw(_("Fecha del pedido requerida."), frappe.ValidationError)
+	today = order_date
 	so = frappe.get_doc(
 		{
 			"doctype": "Sales Order",
@@ -101,6 +103,13 @@ def create_sales_orders(order_import: str) -> dict:
 	if doc.status != "Preflight Passed":
 		frappe.throw(
 			_("La importacion debe estar en 'Preflight Passed' para crear Sales Orders."),
+			frappe.ValidationError,
+		)
+
+	# Fail-closed: la fecha del pedido es obligatoria (no hay default; no se crea OV sin ella).
+	if not doc.order_date:
+		frappe.throw(
+			_("Capture la 'Fecha del pedido' antes de crear las Ordenes de Venta."),
 			frappe.ValidationError,
 		)
 

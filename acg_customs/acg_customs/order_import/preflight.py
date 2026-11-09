@@ -14,7 +14,7 @@ import io
 
 import frappe
 from frappe import _
-from frappe.utils import getdate, nowdate
+from frappe.utils import getdate
 
 from . import parser, profiles, resolver
 
@@ -193,13 +193,17 @@ def execute_preflight(doc) -> dict:
 			)
 	summary["products_resolved"] = resolved_products
 
+	# --- Fecha del pedido: OBLIGATORIA y manual (no hay default, no se lee del Excel) ---
+	order_date = doc.order_date
+	summary["order_date"] = str(order_date) if order_date else None
+	if not order_date:
+		errors.append(_("Capture la 'Fecha del pedido' antes de ejecutar el preflight."))
+
 	# --- Precio explicitamente vigente a la fecha del pedido (sin fallback nativo) ---
-	# Solo aplica cuando el Customer tiene lista de precios nativa configurada.
-	order_date = doc.order_date or nowdate()
-	summary["order_date"] = str(order_date)
+	# Solo aplica cuando el Customer tiene lista de precios nativa configurada y hay fecha.
 	price_list = frappe.db.get_value("Customer", customer, "default_price_list")
 	summary["price_list"] = price_list
-	if price_list:
+	if price_list and order_date:
 		for plu, item in sorted(resolved_items.items()):
 			if not _has_valid_price(item, price_list, order_date):
 				summary["products_without_price"].append(

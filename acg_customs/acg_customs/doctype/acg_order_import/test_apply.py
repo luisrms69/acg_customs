@@ -429,3 +429,12 @@ class TestApply(FrappeTestCase):
 		self.assertEqual(row.reconciliation_status, "PASS")
 		self.assertEqual(row.excel_total, 50.0)
 		self.assertEqual(row.erp_total, 50.0)
+
+	# FECHA obligatoria: sin order_date el preflight FALLA y no se crean OV
+	def test_order_date_required_blocks_creation(self):
+		doc = _make_import(PROVIDER, _wb_one(), order_date=None)
+		preflight.run_preflight(doc.name)
+		doc.reload()
+		self.assertEqual(doc.status, "Preflight Failed")
+		with self.assertRaises(frappe.ValidationError):
+			apply.create_sales_orders(doc.name)

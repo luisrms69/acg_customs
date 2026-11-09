@@ -15,8 +15,9 @@ DocType: **ACG Order Import**. Carga el Excel del pedido del proveedor y genera 
 
 ## Fecha del pedido y precio vigente
 
-- La **Fecha del pedido** (`order_date`) se captura **en el formulario** (por defecto hoy);
-  **no se lee del Excel**. Ajústala a la fecha real del pedido antes del preflight.
+- La **Fecha del pedido** (`order_date`) es **obligatoria y manual**: inicia **vacía**, se
+  captura en el formulario (**no se lee del Excel**) y es **requerida antes del preflight**
+  (sin ella el preflight **FALLA** y no se crean OV). No se modifica automáticamente.
 - La `order_date` fija la `transaction_date` de las OV. ERPNext selecciona el `Item Price`
   cuya vigencia cubre esa fecha.
 - **Preflight de precio por fecha (*fail-closed*):** cuando el Customer tiene

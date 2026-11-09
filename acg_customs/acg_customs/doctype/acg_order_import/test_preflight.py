@@ -223,14 +223,25 @@ def _ensure_user(email, provider):
 	return email
 
 
-def _make_import(provider, wb_bytes):
+def _make_import(provider, wb_bytes, order_date="__today__"):
+	# order_date es obligatoria en produccion (sin default); los tests fijan una fecha
+	# explicita. Pasar order_date=None para probar el caso "sin fecha".
+	if order_date == "__today__":
+		order_date = frappe.utils.nowdate()
 	prev = frappe.session.user
 	frappe.set_user("Administrator")
 	try:
 		f = frappe.get_doc(
 			{"doctype": "File", "file_name": "pedido.xlsx", "is_private": 1, "content": wb_bytes}
 		).insert(ignore_permissions=True)
-		doc = frappe.get_doc({"doctype": "ACG Order Import", "provider": provider, "excel_file": f.file_url})
+		doc = frappe.get_doc(
+			{
+				"doctype": "ACG Order Import",
+				"provider": provider,
+				"excel_file": f.file_url,
+				"order_date": order_date,
+			}
+		)
 		doc.insert(ignore_permissions=True)
 		return doc
 	finally:
@@ -574,3 +585,11 @@ class TestPreflight(FrappeTestCase):
 		_, s = self._run(wb)
 		self.assertEqual(s["branches_duplicated"], [BRANCH_1])
 		self.assertTrue(any("columna" in w.lower() for w in s["warnings"]))
+
+	# FECHA: order_date es OBLIGATORIA (sin default) -> sin fecha el preflight FALLA
+	def test_order_date_required(self):
+		doc = _make_import(PROVIDER, valid_workbook(), order_date=None)
+		s = preflight.execute_preflight(doc)
+		self.assertEqual(s["result"], "FAIL")
+		self.assertIsNone(s["order_date"])
+		self.assertTrue(any("fecha del pedido" in e.lower() for e in s["structural_errors"]))
