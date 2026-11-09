@@ -400,8 +400,8 @@ class TestApply(FrappeTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			make_sales_invoice(so.name)
 
-	# CONCILIACION: formato Java (pedido_grid_v2), total ANTES de productos -> PASS
-	def test_recon_v2_format_java(self):
+	# CONCILIACION: perfil pedido_grid_v2, total ANTES de productos -> PASS
+	def test_recon_v2_format_before_products(self):
 		wb = build_workbook_v2(
 			[{"code": BRANCH_1, "name": "B1"}, {"code": BRANCH_2, "name": "B2"}],
 			[{"plu": PLU_A, "articulo": "A"}, {"plu": PLU_B, "articulo": "B"}],

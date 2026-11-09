@@ -68,6 +68,43 @@ sobre `ACG Order Import` y `File`). El `provider` es inmutable (`set_only_once`)
 fuerza server-side (anti-spoofing). El archivo original se conserva como Private File con
 SHA-256.
 
+## Límite con la facturación (otra app)
+
+La responsabilidad de `acg_customs` **termina en la OV en borrador** y su conciliación. La
+emisión de la factura (`Sales Invoice`), el timbrado CFDI y la **addenda del retailer** viven
+en `facturacion_mexico` (app aparte: flujo nativo de ERPNext + construcción de addenda).
+`acg_customs` **no** genera comprobantes fiscales ni arma la addenda; solo etiqueta los
+documentos de venta con la dimensión contable de proveedor para trazabilidad.
+
+## Validación funcional (v0.2.0)
+
+El ciclo se validó de extremo a extremo con datos reales de una semana de operación:
+
+- **Importación de precios:** carga multi-bloque, vigencia nativa (`Item Price`
+  `valid_from`/`valid_upto`) y detección de variación anormal.
+- **Importación de pedidos en los dos perfiles** (`comercial_grid_v1` y `pedido_grid_v2`):
+  preflight *fail-closed*, resolución de sucursal/producto y exigencia de precio vigente por
+  fecha.
+- **Generación de OV** por sucursal y **conciliación de totales**: coincidencia al centavo,
+  salvo casos en que el total declarado en el Excel del proveedor **no cuadra con la suma de
+  sus propios renglones** — eso se marca `WARNING` (es inconsistencia del archivo origen, no
+  del sistema; precios y cantidades por línea coinciden con el ERP).
+- **Factura/CFDI:** se verificó que el comprobante emitido por `facturacion_mexico` reproduce
+  importe, conceptos y total de la OV correspondiente.
+
+## Pendientes y fallos conocidos
+
+- **Modelo de recepción de mercancía:** falta confirmar con el cliente si la factura se ancla
+  a la fecha de **recepción** del retailer o a la del **pedido**; define las fechas
+  fiscales/addenda. Decisión de negocio pendiente.
+- **Defectos de facturación — ámbito `facturacion_mexico`, NO `acg_customs`:** en el
+  CFDI/addenda, la **fecha del comprobante** y las fechas de addenda
+  (`DeliveryDate`/`ReferenceDate`) se emiten con la fecha de **timbrado** en vez de la fecha
+  de operación, y faltan identificadores de pedido/guía (ON/IV/ATZ). Se registran aquí **solo
+  como trazabilidad**; su corrección corresponde a `facturacion_mexico`.
+- **Vigencias de precio solapadas:** se advierten, pero no hay auto-cierre de la ventana
+  previa (deuda conocida, ver [ADR-0001](../adr/0001-vigencia-nativa-item-price.md)).
+
 ## Referencia de DocTypes
 
 Ver [Referencia de DocTypes y campos](../referencia/doctypes.md).
