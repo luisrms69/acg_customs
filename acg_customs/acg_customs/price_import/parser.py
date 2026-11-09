@@ -108,14 +108,11 @@ def parse_workbook(wb):
 	if not sheets:
 		return _empty(["Estructura no reconocida (se esperaba CODIGO | DESCRIPCION | COSTO)."])
 	if len(sheets) > 1:
-		return _empty(
-			[
-				"Archivo incorrecto: el libro debe traer UNA sola hoja de precios (una semana); "
-				"tiene {0} hojas de precios ({1}). Suba solo el archivo de la semana a importar.".format(
-					len(sheets), ", ".join(sheets)
-				)
-			]
-		)
+		msg = (
+			"Archivo incorrecto: el libro debe traer UNA sola hoja de precios (una semana); "
+			"tiene {0} hojas de precios ({1}). Suba solo el archivo de la semana a importar."
+		).format(len(sheets), ", ".join(sheets))
+		return _empty([msg])
 
 	sheet_name = sheets[0]
 	ws = wb[sheet_name]
