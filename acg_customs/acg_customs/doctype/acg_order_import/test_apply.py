@@ -30,6 +30,7 @@ from acg_customs.acg_customs.doctype.acg_order_import.test_preflight import (
 	_ensure_user,
 	_make_import,
 	build_workbook,
+	build_workbook_v2,
 )
 from acg_customs.acg_customs.order_import import apply, preflight
 from acg_customs.setup.install import PROVIDER_DIMENSION_FIELD, ensure_provider_dimension
@@ -101,6 +102,11 @@ class TestApply(FrappeTestCase):
 		ensure_provider_dimension()  # Accounting Dimension de proveedor (campo en Sales Order)
 		cls.user = _ensure_user(USER, PROVIDER)
 		cls.user2 = _ensure_user(USER2, PROVIDER2)
+
+	def setUp(self):
+		# ITEM_NP se usa solo en los tests de cobertura de precio por fecha; aislarlo
+		# entre tests para que una ventana creada en uno no contamine a otro.
+		frappe.db.delete("Item Price", {"item_code": ITEM_NP, "price_list": PRICE_LIST})
 
 	def tearDown(self):
 		frappe.set_user("Administrator")
@@ -235,19 +241,68 @@ class TestApply(FrappeTestCase):
 		self.assertEqual(rates[ITEM_B], RATE_B)
 		self.assertEqual(so2.grand_total, RATE_A * 2 + RATE_B * 3)
 
-	# Fail-closed por precio faltante: Item resoluble pero SIN Item Price -> no se crean OVs
+	# Fail-closed por precio faltante: ahora el PREFLIGHT lo detecta (issue #2), antes de crear OV.
 	def test_missing_price_fails_closed(self):
 		wb = build_workbook(
 			[{"code": BRANCH_1, "name": "B1"}], [{"plu": PLU_NP, "articulo": "SIN PRECIO"}], {(0, 0): 4}
 		)
-		doc = self._passed_import(wb)  # preflight PASS (resuelve por ICD)
+		doc = _make_import(PROVIDER, wb)
+		preflight.run_preflight(doc.name)
+		doc.reload()
+		# El preflight bloquea: ITEM_NP resuelve por ICD pero no tiene Item Price vigente.
+		self.assertEqual(doc.status, "Preflight Failed")
+		summary = frappe.parse_json(doc.preflight_summary)
+		self.assertTrue(any(p["item"] == ITEM_NP for p in summary["products_without_price"]))
+		# Defensa en profundidad: apply tambien rechaza (no esta en Preflight Passed).
 		before = frappe.db.count("Sales Order")
 		with self.assertRaises(frappe.ValidationError):
 			apply.create_sales_orders(doc.name)
 		doc.reload()
 		self.assertNotEqual(doc.status, "Applied")
 		self.assertEqual(len(doc.sales_orders), 0)
-		self.assertEqual(frappe.db.count("Sales Order"), before)  # rollback total
+		self.assertEqual(frappe.db.count("Sales Order"), before)
+
+	# NO FALLBACK: un precio con vigencia fuera de la fecha del pedido NO sirve -> preflight FAIL.
+	def test_price_outside_validity_blocks(self):
+		frappe.get_doc(
+			{
+				"doctype": "Item Price",
+				"item_code": ITEM_NP,
+				"price_list": PRICE_LIST,
+				"price_list_rate": 7.0,
+				"valid_from": "2020-01-01",
+				"valid_upto": "2020-01-07",
+			}
+		).insert(ignore_permissions=True)
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}], [{"plu": PLU_NP, "articulo": "VIEJO"}], {(0, 0): 2}
+		)
+		doc = _make_import(PROVIDER, wb)  # order_date = hoy (default)
+		preflight.run_preflight(doc.name)
+		doc.reload()
+		self.assertEqual(doc.status, "Preflight Failed")
+		summary = frappe.parse_json(doc.preflight_summary)
+		self.assertTrue(any(p["item"] == ITEM_NP for p in summary["products_without_price"]))
+
+	# POSITIVO: precio con vigencia que cubre la fecha del pedido -> PASS y rate correcto.
+	def test_dated_price_covering_date_passes(self):
+		frappe.get_doc(
+			{
+				"doctype": "Item Price",
+				"item_code": ITEM_NP,
+				"price_list": PRICE_LIST,
+				"price_list_rate": 9.0,
+				"valid_from": frappe.utils.add_days(frappe.utils.nowdate(), -3),
+				"valid_upto": frappe.utils.add_days(frappe.utils.nowdate(), 3),
+			}
+		).insert(ignore_permissions=True)
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}], [{"plu": PLU_NP, "articulo": "VIGENTE"}], {(0, 0): 2}
+		)
+		doc = self._passed_import(wb)  # ahora PASA el preflight
+		res = apply.create_sales_orders(doc.name)
+		so = frappe.get_doc("Sales Order", res["created"][0])
+		self.assertEqual(so.items[0].rate, 9.0)
 
 	# proveedor cruzado no puede aplicar importacion ajena
 	def test_cross_provider_cannot_apply(self):
@@ -258,3 +313,128 @@ class TestApply(FrappeTestCase):
 				apply.create_sales_orders(doc.name)
 		finally:
 			frappe.set_user("Administrator")
+
+	# ---- Candado de conciliacion de totales (Opcion B: posterior a la OV) ----
+	def _recon_by_branch(self, res):
+		return {d["branch"]: d for d in res["reconciliation"]["detail"]}
+
+	# CONCILIACION: total Excel == grand_total OV -> PASS
+	def test_recon_total_match_pass(self):
+		# B1: PLU_A x5 -> 50 ; B2: PLU_A x2 + PLU_B x3 -> 80
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}, {"code": BRANCH_2, "name": "B2"}],
+			[{"plu": PLU_A, "articulo": "A"}, {"plu": PLU_B, "articulo": "B"}],
+			{(0, 0): 5, (0, 1): 2, (1, 1): 3},
+			totals={0: 50.0, 1: 80.0},
+		)
+		doc = self._passed_import(wb)
+		res = apply.create_sales_orders(doc.name)
+		by = self._recon_by_branch(res)
+		self.assertEqual(by[BRANCH_1]["status"], "PASS")
+		self.assertEqual(by[BRANCH_2]["status"], "PASS")
+		self.assertEqual(res["reconciliation"]["pass"], 2)
+		self.assertEqual(by[BRANCH_1]["excel_total"], 50.0)
+		self.assertEqual(by[BRANCH_1]["erp_total"], 50.0)
+
+	# CONCILIACION: total Excel distinto (precio/cantidad) -> WARNING con diferencia
+	def test_recon_total_mismatch_warning(self):
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}, {"code": BRANCH_2, "name": "B2"}],
+			[{"plu": PLU_A, "articulo": "A"}, {"plu": PLU_B, "articulo": "B"}],
+			{(0, 0): 5, (0, 1): 2, (1, 1): 3},
+			totals={0: 50.0, 1: 999.00},  # B2 no coincide (OV=80)
+		)
+		doc = self._passed_import(wb)
+		res = apply.create_sales_orders(doc.name)
+		by = self._recon_by_branch(res)
+		self.assertEqual(by[BRANCH_1]["status"], "PASS")
+		self.assertEqual(by[BRANCH_2]["status"], "WARNING")
+		self.assertAlmostEqual(by[BRANCH_2]["diff"], 80.0 - 999.0, places=2)
+		# la OV con diferencia queda en BORRADOR
+		so = frappe.get_doc("Sales Order", by[BRANCH_2]["sales_order"])
+		self.assertEqual(so.docstatus, 0)
+
+	# CONCILIACION: total de referencia ausente -> SIN VALIDAR (no aprueba en silencio)
+	def test_recon_total_absent_sin_validar(self):
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}],
+			[{"plu": PLU_A, "articulo": "A"}],
+			{(0, 0): 5},
+		)  # sin fila de totales
+		doc = self._passed_import(wb)
+		res = apply.create_sales_orders(doc.name)
+		by = self._recon_by_branch(res)
+		self.assertEqual(by[BRANCH_1]["status"], "SIN VALIDAR")
+		self.assertIsNone(by[BRANCH_1]["excel_total"])
+		self.assertEqual(res["reconciliation"]["sin_validar"], 1)
+
+	# CONCILIACION: por sucursal independiente (PASS, WARNING y SIN VALIDAR juntos)
+	def test_recon_per_branch_independent(self):
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}, {"code": BRANCH_2, "name": "B2"}],
+			[{"plu": PLU_A, "articulo": "A"}, {"plu": PLU_B, "articulo": "B"}],
+			{(0, 0): 5, (0, 1): 2, (1, 1): 3},
+			totals={0: 50.0},  # solo B1 tiene total; B2 queda SIN VALIDAR
+		)
+		doc = self._passed_import(wb)
+		res = apply.create_sales_orders(doc.name)
+		by = self._recon_by_branch(res)
+		self.assertEqual(by[BRANCH_1]["status"], "PASS")
+		self.assertEqual(by[BRANCH_2]["status"], "SIN VALIDAR")
+
+	# CONTROL: las OV quedan en BORRADOR y no se pueden facturar (bloqueo nativo del flujo a FV)
+	def test_recon_ovs_stay_draft_block_fv(self):
+		from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
+
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}],
+			[{"plu": PLU_A, "articulo": "A"}],
+			{(0, 0): 5},
+			totals={0: 50.0},
+		)
+		doc = self._passed_import(wb)
+		res = apply.create_sales_orders(doc.name)
+		so = frappe.get_doc("Sales Order", res["created"][0])
+		self.assertEqual(so.docstatus, 0)  # borrador
+		# ERPNext nativo no permite facturar una OV en borrador
+		with self.assertRaises(frappe.ValidationError):
+			make_sales_invoice(so.name)
+
+	# CONCILIACION: perfil pedido_grid_v2, total ANTES de productos -> PASS
+	def test_recon_v2_format_before_products(self):
+		wb = build_workbook_v2(
+			[{"code": BRANCH_1, "name": "B1"}, {"code": BRANCH_2, "name": "B2"}],
+			[{"plu": PLU_A, "articulo": "A"}, {"plu": PLU_B, "articulo": "B"}],
+			{(0, 0): 5, (0, 1): 2, (1, 1): 3},
+			totals={0: 50.0, 1: 80.0},
+		)
+		doc = self._passed_import(wb)
+		res = apply.create_sales_orders(doc.name)
+		by = self._recon_by_branch(res)
+		self.assertEqual(by[BRANCH_1]["status"], "PASS")
+		self.assertEqual(by[BRANCH_2]["status"], "PASS")
+
+	# CONCILIACION: persistida en la fila hija (auditoria)
+	def test_recon_persisted_on_child(self):
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}],
+			[{"plu": PLU_A, "articulo": "A"}],
+			{(0, 0): 5},
+			totals={0: 50.0},
+		)
+		doc = self._passed_import(wb)
+		apply.create_sales_orders(doc.name)
+		doc.reload()
+		row = doc.sales_orders[0]
+		self.assertEqual(row.reconciliation_status, "PASS")
+		self.assertEqual(row.excel_total, 50.0)
+		self.assertEqual(row.erp_total, 50.0)
+
+	# FECHA obligatoria: sin order_date el preflight FALLA y no se crean OV
+	def test_order_date_required_blocks_creation(self):
+		doc = _make_import(PROVIDER, _wb_one(), order_date=None)
+		preflight.run_preflight(doc.name)
+		doc.reload()
+		self.assertEqual(doc.status, "Preflight Failed")
+		with self.assertRaises(frappe.ValidationError):
+			apply.create_sales_orders(doc.name)

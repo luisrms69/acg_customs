@@ -10,6 +10,10 @@
   "description",
   "previous_rate",
   "new_rate",
+  "variation_pct",
+  "abnormal",
+  "valid_from",
+  "valid_upto",
   "action"
  ],
  "fields": [
@@ -43,6 +47,28 @@
    "fieldtype": "Float",
    "label": "New Rate",
    "in_list_view": 1
+  },
+  {
+   "fieldname": "variation_pct",
+   "fieldtype": "Percent",
+   "label": "Variacion (%)",
+   "in_list_view": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "abnormal",
+   "fieldtype": "Check",
+   "label": "Variacion anormal"
+  },
+  {
+   "fieldname": "valid_from",
+   "fieldtype": "Date",
+   "label": "Vigente desde"
+  },
+  {
+   "fieldname": "valid_upto",
+   "fieldtype": "Date",
+   "label": "Vigente hasta"
   },
   {
    "fieldname": "action",

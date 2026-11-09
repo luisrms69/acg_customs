@@ -14,8 +14,28 @@ import io
 
 import frappe
 from frappe import _
+from frappe.utils import getdate
 
 from . import parser, profiles, resolver
+
+
+def _has_valid_price(item, price_list, on_date):
+	"""¿Existe un Item Price en `price_list` cuya vigencia cubra `on_date`?
+
+	Replica el filtro temporal nativo de ERPNext (valid_from/valid_upto, nulos = abiertos),
+	PERO sin el fallback al precio mas reciente: si ninguna ventana cubre la fecha -> False.
+	"""
+	d = getdate(on_date)
+	for r in frappe.get_all(
+		"Item Price",
+		filters={"item_code": item, "price_list": price_list},
+		fields=["valid_from", "valid_upto"],
+	):
+		if (not r.valid_from or getdate(r.valid_from) <= d) and (
+			not r.valid_upto or getdate(r.valid_upto) >= d
+		):
+			return True
+	return False
 
 
 def _load_content(doc):
@@ -40,13 +60,19 @@ def execute_preflight(doc) -> dict:
 		"file_sha256": doc.file_sha256,
 		"customer": None,
 		"header_row": None,
-		"branches_detected": 0,
+		# Columnas de sucursal en el archivo (catalogo completo del proveedor), NO el pedido.
+		"branch_columns_in_file": 0,
+		"branches_duplicated": [],
+		# Sucursales REALES del pedido (claves unicas con cantidad > 0).
 		"branches_with_orders": 0,
 		"product_lines": 0,
 		"total_units": 0,
 		"products_resolved": 0,
 		"products_missing": [],
 		"products_ambiguous": [],
+		"products_without_price": [],
+		"order_date": None,
+		"price_list": None,
 		"branches_resolved": 0,
 		"branches_missing": [],
 		"branches_ambiguous": [],
@@ -96,7 +122,24 @@ def execute_preflight(doc) -> dict:
 	# --- Parseo estructural ---
 	parsed = parser.parse_workbook(wb, spec)
 	summary["header_row"] = parsed["header_row"]
-	summary["branches_detected"] = len(parsed["branches"])
+	# Columnas de sucursal en el archivo (catalogo del proveedor): son sucursales reales,
+	# pero incluyen las que NO pidieron esta vez. NO es "el pedido".
+	summary["branch_columns_in_file"] = len(parsed["branches"])
+	# Una clave puede aparecer en VARIAS columnas del catalogo (p. ej. una columna de respaldo
+	# vacia). Eso NO implica suma: solo se advierte si la clave trae pedido en MAS DE UNA columna
+	# (ahi SI se suman cantidades y hay que verificar que sea la misma sucursal).
+	cols_per_code = {}
+	for ln in parsed["lines"]:
+		cols_per_code.setdefault(ln["branch_code"], set()).add(ln["col"])
+	summed = sorted(c for c, cols in cols_per_code.items() if len(cols) > 1)
+	summary["branches_duplicated"] = summed
+	if summed:
+		summary["warnings"].append(
+			_(
+				"Sucursal(es) cuyo pedido proviene de MAS de una columna; sus cantidades se suman: "
+				"{0}. Verifique que esas columnas correspondan a la misma sucursal."
+			).format(", ".join(summed))
+		)
 	summary["product_lines"] = len(parsed["lines"])
 	summary["total_units"] = parsed["total_units"]
 	errors.extend(parsed["structural_errors"])
@@ -136,10 +179,12 @@ def execute_preflight(doc) -> dict:
 
 	# --- Resolucion de productos (solo los que traen pedido) ---
 	resolved_products = 0
+	resolved_items = {}  # plu -> item_code (solo los resueltos)
 	for plu in order_plus:
 		res = resolver.resolve_product(customer, plu)
 		if res["status"] == "ok":
 			resolved_products += 1
+			resolved_items[plu] = res["item"]
 		elif res["status"] == "missing":
 			summary["products_missing"].append({"plu": plu, "articulo": art_by_plu.get(plu)})
 		else:
@@ -148,6 +193,23 @@ def execute_preflight(doc) -> dict:
 			)
 	summary["products_resolved"] = resolved_products
 
+	# --- Fecha del pedido: OBLIGATORIA y manual (no hay default, no se lee del Excel) ---
+	order_date = doc.order_date
+	summary["order_date"] = str(order_date) if order_date else None
+	if not order_date:
+		errors.append(_("Capture la 'Fecha del pedido' antes de ejecutar el preflight."))
+
+	# --- Precio explicitamente vigente a la fecha del pedido (sin fallback nativo) ---
+	# Solo aplica cuando el Customer tiene lista de precios nativa configurada y hay fecha.
+	price_list = frappe.db.get_value("Customer", customer, "default_price_list")
+	summary["price_list"] = price_list
+	if price_list and order_date:
+		for plu, item in sorted(resolved_items.items()):
+			if not _has_valid_price(item, price_list, order_date):
+				summary["products_without_price"].append(
+					{"plu": plu, "item": item, "articulo": art_by_plu.get(plu)}
+				)
+
 	# --- Veredicto fail-closed ---
 	blocking = (
 		errors
@@ -155,6 +217,7 @@ def execute_preflight(doc) -> dict:
 		or summary["branches_ambiguous"]
 		or summary["products_missing"]
 		or summary["products_ambiguous"]
+		or summary["products_without_price"]
 	)
 	summary["result"] = "FAIL" if blocking else "PASS"
 	return summary
@@ -170,6 +233,11 @@ def _errors_text(summary) -> str:
 		parts.append(f"Producto no resoluble: PLU {p['plu']} ({p.get('articulo')}).")
 	for p in summary.get("products_ambiguous", []):
 		parts.append(f"Producto ambiguo: PLU {p['plu']} -> {p['candidates']}.")
+	for p in summary.get("products_without_price", []):
+		parts.append(
+			f"Sin precio vigente a la fecha {summary.get('order_date')}: "
+			f"PLU {p['plu']} ({p.get('articulo')}) -> {p['item']}."
+		)
 	return "\n".join(parts)
 
 

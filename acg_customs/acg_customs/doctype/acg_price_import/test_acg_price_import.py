@@ -27,6 +27,9 @@ from acg_customs.acg_customs.price_import import service
 PRICE_LIST = "ACG Price Test List"
 SMM_USER = "acg_price_smm@example.com"
 IMPORTER_USER = "acg_price_importer@example.com"
+# Vigencia por defecto de las corridas de prueba (semana ficticia)
+VALID_FROM = "2026-01-05"
+VALID_UPTO = "2026-01-11"
 
 
 def build_price_wb(rows, *, header=("CODIGO", "DESCRIPCION", "COSTO"), sheet="Hoja1"):
@@ -41,6 +44,46 @@ def build_price_wb(rows, *, header=("CODIGO", "DESCRIPCION", "COSTO"), sheet="Ho
 		if desc is not None:
 			ws.cell(row=i, column=2, value=desc)
 		if cost is not None:
+			ws.cell(row=i, column=3, value=cost)
+	bio = io.BytesIO()
+	wb.save(bio)
+	return bio.getvalue()
+
+
+def build_two_block_wb(left_rows, right_rows, *, sheet="Hoja1"):
+	"""Hoja con DOS bloques CODIGO|DESCRIPCION|COSTO lado a lado: A-C y E-G
+	(col 4 vacia de separacion), como el archivo real del cliente."""
+	wb = openpyxl.Workbook()
+	ws = wb.active
+	ws.title = sheet
+	for base in (1, 5):  # A y E
+		ws.cell(row=1, column=base, value="CODIGO")
+		ws.cell(row=1, column=base + 1, value="DESCRIPCION")
+		ws.cell(row=1, column=base + 2, value="COSTO")
+	for i, (code, desc, cost) in enumerate(left_rows, start=2):
+		ws.cell(row=i, column=1, value=code)
+		ws.cell(row=i, column=2, value=desc)
+		ws.cell(row=i, column=3, value=cost)
+	for i, (code, desc, cost) in enumerate(right_rows, start=2):
+		ws.cell(row=i, column=5, value=code)
+		ws.cell(row=i, column=6, value=desc)
+		ws.cell(row=i, column=7, value=cost)
+	bio = io.BytesIO()
+	wb.save(bio)
+	return bio.getvalue()
+
+
+def build_multi_sheet_wb(sheets):
+	"""Libro con varias hojas de precios {nombre: [(code, desc, cost), ...]}."""
+	wb = openpyxl.Workbook()
+	wb.remove(wb.active)
+	for name, rows in sheets.items():
+		ws = wb.create_sheet(title=name)
+		for c, h in enumerate(("CODIGO", "DESCRIPCION", "COSTO"), start=1):
+			ws.cell(row=1, column=c, value=h)
+		for i, (code, desc, cost) in enumerate(rows, start=2):
+			ws.cell(row=i, column=1, value=code)
+			ws.cell(row=i, column=2, value=desc)
 			ws.cell(row=i, column=3, value=cost)
 	bio = io.BytesIO()
 	wb.save(bio)
@@ -69,14 +112,22 @@ def _ensure_user(email, role):
 	return email
 
 
-def _make_import(wb_bytes):
+def _make_import(wb_bytes, *, valid_from=VALID_FROM, valid_upto=VALID_UPTO):
 	prev = frappe.session.user
 	frappe.set_user("Administrator")
 	try:
 		f = frappe.get_doc(
 			{"doctype": "File", "file_name": "costos.xlsx", "is_private": 1, "content": wb_bytes}
 		).insert(ignore_permissions=True)
-		doc = frappe.get_doc({"doctype": "ACG Price Import", "customer": CUSTOMER, "excel_file": f.file_url})
+		doc = frappe.get_doc(
+			{
+				"doctype": "ACG Price Import",
+				"customer": CUSTOMER,
+				"excel_file": f.file_url,
+				"valid_from": valid_from,
+				"valid_upto": valid_upto,
+			}
+		)
 		doc.insert(ignore_permissions=True)
 		return doc
 	finally:
@@ -301,3 +352,233 @@ class TestPriceImport(FrappeTestCase):
 		_, s = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))
 		self.assertIn("skipped", s)
 		self.assertEqual(s["skipped"], 0)
+
+	# 18. PARSER: hoja con DOS bloques de columnas (A-C y E-G) lee AMBOS
+	def test_parser_lee_dos_bloques(self):
+		from acg_customs.acg_customs.price_import import parser
+
+		wb_bytes = build_two_block_wb(
+			left_rows=[("1001", "IZQ UNO", 10.0), ("1002", "IZQ DOS", 20.0)],
+			right_rows=[("2001", "DER UNO", 30.0), ("2002", "DER DOS", 40.0)],
+		)
+		wb = openpyxl.load_workbook(io.BytesIO(wb_bytes), data_only=True)
+		p = parser.parse_workbook(wb)
+		self.assertEqual(p["blocks"], 2)
+		codes = {r["code"] for r in p["rows"]}
+		# los 2 del bloque izquierdo Y los 2 del derecho
+		self.assertEqual(codes, {"1001", "1002", "2001", "2002"})
+
+	# 19. INTEGRACION: preflight resuelve productos de AMBOS bloques
+	def test_preflight_resuelve_ambos_bloques(self):
+		# PLU_A en bloque izquierdo, PLU_B en bloque derecho
+		doc, s = self._pf(
+			build_two_block_wb(
+				left_rows=[(PLU_A, "ART A", 11.0)],
+				right_rows=[(PLU_B, "ART B", 22.0)],
+			)
+		)
+		self.assertEqual(s["result"], "PASS")
+		self.assertEqual(s["resolved"], 2)
+		by_item = {ln.item: ln.new_rate for ln in doc.lines}
+		self.assertEqual(by_item.get(ITEM_A), 11.0)
+		self.assertEqual(by_item.get(ITEM_B), 22.0)
+
+	# 20. ARCHIVO: libro multi-hoja -> rechazado al GUARDAR (server-side, anti-bypass API)
+	def test_multi_sheet_rejected_on_save(self):
+		wb = build_multi_sheet_wb({"SEM 1": [(PLU_A, "A", 10.0)], "SEM 2": [(PLU_A, "A", 12.0)]})
+		with self.assertRaises(frappe.ValidationError):
+			_make_import(wb)  # validate() lo rechaza antes de guardar
+
+	# 20b. sheet_info cuenta las hojas (lo invoca la GUI al ADJUNTAR, antes de guardar)
+	def test_sheet_info_counts_sheets(self):
+		frappe.set_user("Administrator")
+		fm = frappe.get_doc(
+			{
+				"doctype": "File",
+				"file_name": "multi.xlsx",
+				"is_private": 1,
+				"content": build_multi_sheet_wb(
+					{"SEM 1": [(PLU_A, "A", 10.0)], "SEM 2": [(PLU_A, "A", 12.0)]}
+				),
+			}
+		).insert(ignore_permissions=True)
+		self.assertEqual(service.sheet_info(fm.file_url)["sheets"], 2)
+		fu = frappe.get_doc(
+			{
+				"doctype": "File",
+				"file_name": "uno.xlsx",
+				"is_private": 1,
+				"content": build_price_wb([(PLU_A, "A", 10.0)]),
+			}
+		).insert(ignore_permissions=True)
+		self.assertEqual(service.sheet_info(fu.file_url)["sheets"], 1)
+
+	# 21. PERIODO: una sola hoja pero SIN valid_from -> FAIL (exige confirmar periodo)
+	def test_single_sheet_requires_period(self):
+		doc = _make_import(build_price_wb([(PLU_A, "A", 10.0)]), valid_from=None, valid_upto=None)
+		s = service.run_preflight(doc.name)
+		self.assertEqual(s["result"], "FAIL")
+
+	# 22. VIGENCIA: apply escribe valid_from/valid_upto en el Item Price
+	def test_apply_sets_validity_window(self):
+		doc, _ = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))
+		service.apply_prices(doc.name)
+		ip = frappe.db.get_value(
+			"Item Price",
+			{"item_code": ITEM_A, "price_list": PRICE_LIST},
+			["valid_from", "valid_upto", "price_list_rate"],
+			as_dict=True,
+		)
+		self.assertEqual(str(ip.valid_from), VALID_FROM)
+		self.assertEqual(str(ip.valid_upto), VALID_UPTO)
+		self.assertEqual(ip.price_list_rate, 10.0)
+
+	# 23. MODIFICADO: precio distinto -> nueva ventana + ventana anterior conservada (2 ventanas)
+	def test_changed_creates_new_window(self):
+		d1, _ = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))  # [01-05, 01-11]
+		service.apply_prices(d1.name)
+		d2 = _make_import(
+			build_price_wb([(PLU_A, "A", 15.0)]), valid_from="2026-01-12", valid_upto="2026-01-18"
+		)
+		service.run_preflight(d2.name)
+		d2.reload()
+		self.assertEqual(d2.lines[0].action, "changed")
+		self.assertEqual(d2.lines[0].previous_rate, 10.0)
+		service.apply_prices(d2.name)
+		self.assertEqual(frappe.db.count("Item Price", {"item_code": ITEM_A, "price_list": PRICE_LIST}), 2)
+		# histórico conservado + ventana nueva
+		self.assertTrue(
+			frappe.db.exists(
+				"Item Price",
+				{
+					"item_code": ITEM_A,
+					"price_list": PRICE_LIST,
+					"valid_from": VALID_FROM,
+					"price_list_rate": 10.0,
+				},
+			)
+		)
+		self.assertTrue(
+			frappe.db.exists(
+				"Item Price",
+				{
+					"item_code": ITEM_A,
+					"price_list": PRICE_LIST,
+					"valid_from": "2026-01-12",
+					"price_list_rate": 15.0,
+				},
+			)
+		)
+
+	# 24. SIN CAMBIOS: misma tarifa en semana siguiente -> EXTIENDE, NO duplica
+	def test_unchanged_extends_not_duplicate(self):
+		d1, _ = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))  # [01-05, 01-11]
+		service.apply_prices(d1.name)
+		d2 = _make_import(
+			build_price_wb([(PLU_A, "A", 10.0)]), valid_from="2026-01-12", valid_upto="2026-01-18"
+		)
+		service.run_preflight(d2.name)
+		d2.reload()
+		self.assertEqual(d2.lines[0].action, "unchanged")
+		r = service.apply_prices(d2.name)
+		self.assertEqual(r["extended"], 1)
+		self.assertEqual(frappe.db.count("Item Price", {"item_code": ITEM_A, "price_list": PRICE_LIST}), 1)
+		ip = frappe.db.get_value(
+			"Item Price",
+			{"item_code": ITEM_A, "price_list": PRICE_LIST},
+			["valid_from", "valid_upto", "price_list_rate"],
+			as_dict=True,
+		)
+		self.assertEqual(str(ip.valid_from), VALID_FROM)  # misma ventana
+		self.assertEqual(str(ip.valid_upto), "2026-01-18")  # vigencia extendida
+		self.assertEqual(ip.price_list_rate, 10.0)
+
+	# 25. MODIFICADO sobre ventana ABIERTA -> cierra la anterior y conserva su precio histórico
+	def test_changed_closes_open_previous(self):
+		d1 = _make_import(build_price_wb([(PLU_A, "A", 10.0)]), valid_from="2026-01-05", valid_upto=None)
+		service.run_preflight(d1.name)
+		service.apply_prices(d1.name)
+		d2 = _make_import(
+			build_price_wb([(PLU_A, "A", 12.0)]), valid_from="2026-01-12", valid_upto="2026-01-18"
+		)
+		service.run_preflight(d2.name)
+		d2.reload()
+		self.assertEqual(d2.lines[0].action, "changed")
+		service.apply_prices(d2.name)
+		self.assertEqual(frappe.db.count("Item Price", {"item_code": ITEM_A, "price_list": PRICE_LIST}), 2)
+		old = frappe.db.get_value(
+			"Item Price",
+			{"item_code": ITEM_A, "price_list": PRICE_LIST, "valid_from": "2026-01-05"},
+			["valid_upto", "price_list_rate"],
+			as_dict=True,
+		)
+		self.assertEqual(str(old.valid_upto), "2026-01-11")  # cerrada justo antes de la nueva
+		self.assertEqual(old.price_list_rate, 10.0)  # precio histórico intacto
+		self.assertEqual(
+			frappe.db.get_value(
+				"Item Price",
+				{"item_code": ITEM_A, "price_list": PRICE_LIST, "valid_from": "2026-01-12"},
+				"price_list_rate",
+			),
+			12.0,
+		)
+
+	# 26. RETROACTIVA: ventana en el pasado no destruye la vigente
+	def test_retroactive_window(self):
+		d1, _ = self._pf(build_price_wb([(PLU_A, "A", 20.0)]))  # ene 05-11
+		service.apply_prices(d1.name)
+		d2 = _make_import(
+			build_price_wb([(PLU_A, "A", 18.0)]), valid_from="2025-12-01", valid_upto="2025-12-07"
+		)
+		service.run_preflight(d2.name)
+		service.apply_prices(d2.name)
+		self.assertEqual(frappe.db.count("Item Price", {"item_code": ITEM_A, "price_list": PRICE_LIST}), 2)
+		# la ventana original sigue intacta
+		self.assertTrue(
+			frappe.db.exists(
+				"Item Price",
+				{
+					"item_code": ITEM_A,
+					"price_list": PRICE_LIST,
+					"valid_from": VALID_FROM,
+					"price_list_rate": 20.0,
+				},
+			)
+		)
+
+	# 27. REIMPORT de la MISMA ventana, mismo costo -> unchanged, sin duplicar
+	def test_reimport_same_window_no_duplicate(self):
+		d1, _ = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))
+		service.apply_prices(d1.name)
+		d2, _ = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))  # misma ventana, mismo costo
+		self.assertEqual({ln.action for ln in d2.lines}, {"unchanged"})
+		service.apply_prices(d2.name)
+		self.assertEqual(frappe.db.count("Item Price", {"item_code": ITEM_A, "price_list": PRICE_LIST}), 1)
+
+	# 28. VARIACION anormal > umbral -> warning + flag abnormal (no bloquea)
+	def test_abnormal_variation_warns(self):
+		d1, _ = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))
+		service.apply_prices(d1.name)
+		d2 = _make_import(
+			build_price_wb([(PLU_A, "A", 15.0)]), valid_from="2026-02-01", valid_upto="2026-02-07"
+		)  # +50%
+		s = service.run_preflight(d2.name)
+		d2.reload()
+		self.assertEqual(s["result"], "PASS")  # advierte, no bloquea
+		self.assertEqual(s["abnormal"], 1)
+		self.assertTrue(any("variacion" in w.lower() for w in s["warnings"]))
+		self.assertEqual(d2.lines[0].abnormal, 1)
+
+	# 29. PARCIAL: importar solo A no toca el Item Price de B
+	def test_partial_import_only_touches_present(self):
+		dB = _make_import(build_price_wb([(PLU_B, "B", 20.0)]))
+		service.run_preflight(dB.name)
+		service.apply_prices(dB.name)
+		dA, _ = self._pf(build_price_wb([(PLU_A, "A", 10.0)]))
+		service.apply_prices(dA.name)
+		self.assertEqual(
+			frappe.db.get_value(
+				"Item Price", {"item_code": ITEM_B, "price_list": PRICE_LIST}, "price_list_rate"
+			),
+			20.0,
+		)

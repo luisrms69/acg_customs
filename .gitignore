@@ -60,3 +60,4 @@ one_offs/
 
 # Tooling local de Claude Code (symlink de ruta absoluta + settings locales)
 .claude/
+site/

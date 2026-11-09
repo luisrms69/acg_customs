@@ -7,6 +7,8 @@
  "engine": "InnoDB",
  "field_order": [
   "provider",
+  "order_date",
+  "total_tolerance",
   "status",
   "source_section",
   "excel_file",
@@ -18,9 +20,11 @@
   "uploaded_on",
   "preflight_section",
   "preflight_report_html",
+  "tech_section",
   "preflight_summary",
   "errors",
   "so_section",
+  "reconciliation_html",
   "sales_orders"
  ],
  "fields": [
@@ -34,6 +38,19 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "description": "Determinado y validado server-side. El valor enviado por el cliente nunca es fuente de verdad para usuarios proveedor."
+  },
+  {
+   "fieldname": "order_date",
+   "fieldtype": "Date",
+   "label": "Fecha del pedido",
+   "description": "Captúrela manualmente (inicia vacía; NO se lee del Excel). Obligatoria antes del preflight. Determina la transaction_date de las OV y la vigencia de precio exigida. No se modifica automáticamente."
+  },
+  {
+   "default": "0.01",
+   "fieldname": "total_tolerance",
+   "fieldtype": "Currency",
+   "label": "Tolerancia de conciliacion",
+   "description": "Diferencia absoluta maxima (Excel vs OV) para considerar PASS. Default 0.01."
   },
   {
    "default": "Uploaded",
@@ -109,6 +126,13 @@
    "label": "Resultado preflight"
   },
   {
+   "fieldname": "tech_section",
+   "fieldtype": "Section Break",
+   "label": "Detalle técnico (opcional)",
+   "collapsible": 1,
+   "collapsed": 1
+  },
+  {
    "fieldname": "preflight_summary",
    "fieldtype": "Code",
    "options": "JSON",
@@ -124,7 +148,12 @@
   {
    "fieldname": "so_section",
    "fieldtype": "Section Break",
-   "label": "Sales Orders generadas"
+   "label": "Órdenes de Venta y conciliación de totales"
+  },
+  {
+   "fieldname": "reconciliation_html",
+   "fieldtype": "HTML",
+   "label": "Conciliación de totales"
   },
   {
    "fieldname": "sales_orders",

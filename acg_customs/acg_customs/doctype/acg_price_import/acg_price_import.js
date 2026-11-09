@@ -2,6 +2,30 @@
 // For license information, please see license.txt
 
 frappe.ui.form.on("ACG Price Import", {
+	excel_file(frm) {
+		// Validacion INMEDIATA al adjuntar: un libro con mas de una hoja de precios se
+		// rechaza en ese momento (sin esperar a guardar / preflight) y se quita del formulario.
+		if (!frm.doc.excel_file) return;
+		frappe.call({
+			method: "acg_customs.acg_customs.price_import.service.sheet_info",
+			args: { file_url: frm.doc.excel_file },
+			callback: (r) => {
+				const info = r.message || {};
+				if ((info.sheets || 0) > 1) {
+					frappe.msgprint({
+						title: __("Archivo incorrecto"),
+						message: __(
+							"Archivo incorrecto: el Excel debe contener una sola hoja ({0} hojas detectadas).",
+							[info.sheets]
+						),
+						indicator: "red",
+					});
+					frm.set_value("excel_file", null);
+				}
+			},
+		});
+	},
+
 	refresh(frm) {
 		acg_render_price_preflight(frm);
 		if (frm.is_new()) return;
@@ -9,7 +33,9 @@ frappe.ui.form.on("ACG Price Import", {
 		const status = frm.doc.status;
 
 		if (["Uploaded", "Preflight Failed", "Preflight Passed"].includes(status)) {
-			frm.add_custom_button(__("Ejecutar Preflight"), () => {
+			frm.add_custom_button(__("Ejecutar Preflight"), async () => {
+				// Guardar primero para que el preflight use la vigencia/datos visibles en el formulario.
+				if (frm.is_dirty()) await frm.save();
 				frappe.call({
 					method: "acg_customs.acg_customs.price_import.service.run_preflight",
 					args: { price_import: frm.doc.name },
@@ -101,7 +127,7 @@ function acg_render_price_preflight(frm) {
 	$w.html(`
 		<div style="margin-bottom:8px">${__("Resultado")}: ${badge}</div>
 		<table style="font-size:12px">${tr}</table>
-		${warn ? `<div style="margin-top:8px"><b>${__("Warnings")}</b><ul>${warn}</ul></div>` : ""}
+		${warn ? `<div style="margin-top:8px"><b>${__("Advertencias")}</b><ul>${warn}</ul></div>` : ""}
 		${
 			errs
 				? `<div style="margin-top:8px;color:#b00"><b>${__(

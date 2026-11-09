@@ -33,9 +33,10 @@ BRANCH_DIRTY = "376"  # en el Excel aparece como "376 ." -> se normaliza a "376"
 # --------------------------------------------------------------------------
 # Construccion de workbook sintetico con la firma estructural del perfil
 # --------------------------------------------------------------------------
-def build_workbook(branches, products, quantities, *, sheet="PEDIDO COMERCIAL", header=None):
+def build_workbook(branches, products, quantities, *, sheet="PEDIDO COMERCIAL", header=None, totals=None):
 	"""branches: list[{code,name}] desde col O. products: list[{plu,articulo}] desde fila 7.
-	quantities: dict[(prod_idx, branch_idx)] = valor."""
+	quantities: dict[(prod_idx, branch_idx)] = valor.
+	totals: dict[branch_idx] = importe de referencia -> fila de totales DESPUES del ultimo producto."""
 	wb = openpyxl.Workbook()
 	ws = wb.active
 	ws.title = sheet
@@ -56,6 +57,10 @@ def build_workbook(branches, products, quantities, *, sheet="PEDIDO COMERCIAL", 
 		ws.cell(row=r, column=14, value=p["articulo"])
 	for (pi, bi), val in quantities.items():
 		ws.cell(row=hr + 1 + pi, column=15 + bi, value=val)
+	if totals:
+		total_row = hr + 1 + len(products)  # fila inmediatamente despues del ultimo producto
+		for bi, amt in totals.items():
+			ws.cell(row=total_row, column=15 + bi, value=amt)
 	bio = io.BytesIO()
 	wb.save(bio)
 	return bio.getvalue()
@@ -69,7 +74,7 @@ def valid_workbook():
 	)
 
 
-def build_workbook_v2(branches, products, quantities, *, trailing=None):
+def build_workbook_v2(branches, products, quantities, *, trailing=None, totals=None):
 	"""Layout del perfil pedido_grid_v2: hoja 'PEDIDO', encabezado fila 3 (D='TIENDAS',
 	E='CLAVE'), clave de sucursal en fila 2, nombre en fila 3, sucursales desde col G(7),
 	productos desde fila 7 (E=clave, F=articulo). `trailing` = columnas pegadas DESPUES del
@@ -94,6 +99,9 @@ def build_workbook_v2(branches, products, quantities, *, trailing=None):
 		ws.cell(row=r, column=6, value=p["articulo"])
 	for (pi, bi), val in quantities.items():
 		ws.cell(row=pr0 + pi, column=7 + bi, value=val)
+	if totals:
+		for bi, amt in totals.items():  # fila de totales ANTES del primer producto (pr0-1)
+			ws.cell(row=pr0 - 1, column=7 + bi, value=amt)
 	if trailing:
 		base = 7 + len(branches)
 		for j, (code, name, qmap) in enumerate(trailing):
@@ -215,14 +223,25 @@ def _ensure_user(email, provider):
 	return email
 
 
-def _make_import(provider, wb_bytes):
+def _make_import(provider, wb_bytes, order_date="__today__"):
+	# order_date es obligatoria en produccion (sin default); los tests fijan una fecha
+	# explicita. Pasar order_date=None para probar el caso "sin fecha".
+	if order_date == "__today__":
+		order_date = frappe.utils.nowdate()
 	prev = frappe.session.user
 	frappe.set_user("Administrator")
 	try:
 		f = frappe.get_doc(
 			{"doctype": "File", "file_name": "pedido.xlsx", "is_private": 1, "content": wb_bytes}
 		).insert(ignore_permissions=True)
-		doc = frappe.get_doc({"doctype": "ACG Order Import", "provider": provider, "excel_file": f.file_url})
+		doc = frappe.get_doc(
+			{
+				"doctype": "ACG Order Import",
+				"provider": provider,
+				"excel_file": f.file_url,
+				"order_date": order_date,
+			}
+		)
 		doc.insert(ignore_permissions=True)
 		return doc
 	finally:
@@ -253,6 +272,10 @@ class TestPreflight(FrappeTestCase):
 		cls.provider2 = _ensure_provider(PROVIDER2, customer=CUSTOMER)
 		cls.user = _ensure_user(USER, PROVIDER)
 		cls.user2 = _ensure_user(USER2, PROVIDER2)
+		# Estos tests cubren resolucion estructural, no precios: fijar regimen "sin lista de
+		# precios" para que el check de precio-vigente del preflight (gateado a default_price_list)
+		# no aplique aqui. Determinista frente a contaminacion cruzada de otras clases.
+		frappe.db.set_value("Customer", CUSTOMER, "default_price_list", None)
 
 	def tearDown(self):
 		frappe.set_user("Administrator")
@@ -525,3 +548,48 @@ class TestPreflight(FrappeTestCase):
 		_, s = self._run(valid_workbook(), provider="Proveedor Sin Customer")
 		self.assertEqual(s["result"], "FAIL")
 		self.assertTrue(any("customer" in e.lower() for e in s["structural_errors"]))
+
+	# CONTEO: columnas de sucursal en el archivo != sucursales del pedido
+	def test_branch_counting(self):
+		wb = build_workbook(
+			[
+				{"code": BRANCH_1, "name": "B1"},
+				{"code": BRANCH_1, "name": "B1 bis"},  # clave repetida en otra columna
+				{"code": BRANCH_2, "name": "B2 sin pedido"},
+			],
+			[{"plu": PLU_A, "articulo": "A"}],
+			{(0, 0): 3},  # pedido SOLO en la primera columna de B1
+		)
+		_, s = self._run(wb)
+		self.assertEqual(s["branch_columns_in_file"], 3)  # 3 columnas de sucursal en el archivo
+		self.assertEqual(s["branches_with_orders"], 1)  # 1 sucursal REAL con pedido
+
+	# DUPLICADO sin suma real (caso 376/435): clave en 2 columnas pero SOLO una pide -> NO se advierte
+	def test_duplicate_column_without_orders_not_warned(self):
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}, {"code": BRANCH_1, "name": "B1 respaldo"}],
+			[{"plu": PLU_A, "articulo": "A"}],
+			{(0, 0): 5},  # solo la primera columna trae pedido; la de respaldo esta vacia
+		)
+		_, s = self._run(wb)
+		self.assertEqual(s["branches_duplicated"], [])  # no hay suma -> no es duplicado operativo
+		self.assertFalse(any("columna" in w.lower() for w in s["warnings"]))
+
+	# DUPLICADO con suma real: la MISMA clave pide en 2 columnas -> se suma y SE advierte
+	def test_duplicate_columns_with_orders_warned(self):
+		wb = build_workbook(
+			[{"code": BRANCH_1, "name": "B1"}, {"code": BRANCH_1, "name": "B1 col2"}],
+			[{"plu": PLU_A, "articulo": "A"}],
+			{(0, 0): 3, (0, 1): 2},  # pedido en AMBAS columnas de la misma clave
+		)
+		_, s = self._run(wb)
+		self.assertEqual(s["branches_duplicated"], [BRANCH_1])
+		self.assertTrue(any("columna" in w.lower() for w in s["warnings"]))
+
+	# FECHA: order_date es OBLIGATORIA (sin default) -> sin fecha el preflight FALLA
+	def test_order_date_required(self):
+		doc = _make_import(PROVIDER, valid_workbook(), order_date=None)
+		s = preflight.execute_preflight(doc)
+		self.assertEqual(s["result"], "FAIL")
+		self.assertIsNone(s["order_date"])
+		self.assertTrue(any("fecha del pedido" in e.lower() for e in s["structural_errors"]))
