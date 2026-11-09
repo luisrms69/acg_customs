@@ -15,6 +15,8 @@ DocType: **ACG Order Import**. Carga el Excel del pedido del proveedor y genera 
 
 ## Fecha del pedido y precio vigente
 
+- La **Fecha del pedido** (`order_date`) se captura **en el formulario** (por defecto hoy);
+  **no se lee del Excel**. Ajústala a la fecha real del pedido antes del preflight.
 - La `order_date` fija la `transaction_date` de las OV. ERPNext selecciona el `Item Price`
   cuya vigencia cubre esa fecha.
 - **Preflight de precio por fecha (*fail-closed*):** cuando el Customer tiene
@@ -32,6 +34,11 @@ DocType: **ACG Order Import**. Carga el Excel del pedido del proveedor y genera 
 - **Producto:** se resuelve por `Item Customer Detail.ref_code`. Producto
   inexistente/ambiguo → FAIL (el sistema no inventa el producto).
 - Columnas sin clave de sucursal con pedido, cantidades no numéricas, etc. → FAIL.
+
+El resumen del preflight distingue **«Sucursales con pedido»** (las reales de esta corrida,
+clave única con cantidad > 0) de **«Columnas de sucursal en el archivo»** (el catálogo completo
+del proveedor; no es el pedido). Si una misma clave de sucursal aparece en **varias columnas**,
+se **advierte** (sus pedidos se suman).
 
 ## Creación de las OV
 

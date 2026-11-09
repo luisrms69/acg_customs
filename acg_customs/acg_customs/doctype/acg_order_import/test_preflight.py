@@ -537,3 +537,21 @@ class TestPreflight(FrappeTestCase):
 		_, s = self._run(valid_workbook(), provider="Proveedor Sin Customer")
 		self.assertEqual(s["result"], "FAIL")
 		self.assertTrue(any("customer" in e.lower() for e in s["structural_errors"]))
+
+	# CONTEO: columnas de sucursal en el archivo != sucursales del pedido; clave repetida -> aviso
+	def test_branch_counting_and_duplicates(self):
+		# dos columnas con la MISMA clave de sucursal + una tercera sucursal sin pedido
+		wb = build_workbook(
+			[
+				{"code": BRANCH_1, "name": "B1"},
+				{"code": BRANCH_1, "name": "B1 bis"},  # clave repetida en otra columna
+				{"code": BRANCH_2, "name": "B2 sin pedido"},
+			],
+			[{"plu": PLU_A, "articulo": "A"}],
+			{(0, 0): 3, (0, 1): 2},  # solo las dos columnas de B1 traen pedido
+		)
+		_, s = self._run(wb)
+		self.assertEqual(s["branch_columns_in_file"], 3)  # 3 columnas de sucursal
+		self.assertEqual(s["branches_with_orders"], 1)  # 1 sucursal REAL con pedido (clave unica)
+		self.assertEqual(s["branches_duplicated"], [BRANCH_1])
+		self.assertTrue(any("repetida" in w.lower() for w in s["warnings"]))

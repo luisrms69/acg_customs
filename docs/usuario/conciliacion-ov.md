@@ -50,6 +50,13 @@ Si el formato no expone un total confiable para una sucursal, esa sucursal queda
 - No se imponen restricciones globales sobre Sales Order: las OV creadas manualmente,
   fuera del importador, no se ven afectadas.
 
+## Dónde se ve el reporte
+
+Tras **Crear Órdenes de Venta**, el diálogo indica cuántas quedaron OK / con diferencia /
+sin validar. En el documento `ACG Order Import`, el panel **«Conciliación de totales»**
+muestra, por sucursal: OV, Total Excel, Total OV, Diferencia y estado
+(`PASS`/`WARNING`/`SIN VALIDAR`). El detalle también queda en la tabla `Órdenes de Venta`.
+
 ## Auditoría
 
 Cada fila `ACG Order Import Sales Order` guarda `reconciliation_status`, `excel_total`,

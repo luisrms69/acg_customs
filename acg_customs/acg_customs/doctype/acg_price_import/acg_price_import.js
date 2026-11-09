@@ -125,7 +125,7 @@ function acg_render_price_preflight(frm) {
 	$w.html(`
 		<div style="margin-bottom:8px">${__("Resultado")}: ${badge}</div>
 		<table style="font-size:12px">${tr}</table>
-		${warn ? `<div style="margin-top:8px"><b>${__("Warnings")}</b><ul>${warn}</ul></div>` : ""}
+		${warn ? `<div style="margin-top:8px"><b>${__("Advertencias")}</b><ul>${warn}</ul></div>` : ""}
 		${
 			errs
 				? `<div style="margin-top:8px;color:#b00"><b>${__(

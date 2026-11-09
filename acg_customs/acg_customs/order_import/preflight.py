@@ -11,6 +11,7 @@ Idempotente: no modifica el archivo original y re-ejecutar produce el mismo resu
 
 import hashlib
 import io
+from collections import Counter
 
 import frappe
 from frappe import _
@@ -60,7 +61,10 @@ def execute_preflight(doc) -> dict:
 		"file_sha256": doc.file_sha256,
 		"customer": None,
 		"header_row": None,
-		"branches_detected": 0,
+		# Columnas de sucursal en el archivo (catalogo completo del proveedor), NO el pedido.
+		"branch_columns_in_file": 0,
+		"branches_duplicated": [],
+		# Sucursales REALES del pedido (claves unicas con cantidad > 0).
 		"branches_with_orders": 0,
 		"product_lines": 0,
 		"total_units": 0,
@@ -119,7 +123,19 @@ def execute_preflight(doc) -> dict:
 	# --- Parseo estructural ---
 	parsed = parser.parse_workbook(wb, spec)
 	summary["header_row"] = parsed["header_row"]
-	summary["branches_detected"] = len(parsed["branches"])
+	# Columnas de sucursal en el archivo (catalogo del proveedor): son sucursales reales,
+	# pero incluyen las que NO pidieron esta vez y posibles columnas con clave repetida.
+	# NO es "el pedido". El pedido son las sucursales con cantidad > 0 (branches_with_orders).
+	col_codes = [b["code"] for b in parsed["branches"]]
+	summary["branch_columns_in_file"] = len(col_codes)
+	dups = sorted({c for c, n in Counter(col_codes).items() if n > 1})
+	summary["branches_duplicated"] = dups
+	if dups:
+		summary["warnings"].append(
+			_("Sucursal(es) con clave repetida en varias columnas (sus pedidos se suman): {0}.").format(
+				", ".join(dups)
+			)
+		)
 	summary["product_lines"] = len(parsed["lines"])
 	summary["total_units"] = parsed["total_units"]
 	errors.extend(parsed["structural_errors"])

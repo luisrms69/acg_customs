@@ -23,6 +23,7 @@
   "preflight_summary",
   "errors",
   "so_section",
+  "reconciliation_html",
   "sales_orders"
  ],
  "fields": [
@@ -42,7 +43,7 @@
    "fieldname": "order_date",
    "fieldtype": "Date",
    "label": "Fecha del pedido",
-   "description": "Fecha del pedido. Determina la transaction_date de las OV y la vigencia de precio exigida en el preflight."
+   "description": "Se captura en el formulario (por defecto hoy; NO se lee del Excel). Determina la transaction_date de las OV y la vigencia de precio exigida en el preflight. Ajústela a la fecha real del pedido."
   },
   {
    "default": "0.01",
@@ -140,7 +141,12 @@
   {
    "fieldname": "so_section",
    "fieldtype": "Section Break",
-   "label": "Sales Orders generadas"
+   "label": "Órdenes de Venta y conciliación de totales"
+  },
+  {
+   "fieldname": "reconciliation_html",
+   "fieldtype": "HTML",
+   "label": "Conciliación de totales"
   },
   {
    "fieldname": "sales_orders",
